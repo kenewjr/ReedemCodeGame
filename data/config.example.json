@@ -1,0 +1,30 @@
+{
+  "adminToken": "change_me_super_secret_token",
+  "pollSeconds": 60,
+  "discordBotToken": "",
+  "games": {
+    "hsr": { "enabled": true },
+    "genshin": { "enabled": true },
+    "wuwa": { "enabled": true },
+    "endfield": { "enabled": true },
+    "nte": { "enabled": true }
+  },
+  "webhooks": [
+    {
+      "id": "hook-1",
+      "name": "My Server Webhook",
+      "url": "https://discord.com/api/webhooks/YOUR_WEBHOOK_ID/YOUR_WEBHOOK_TOKEN",
+      "username": "RedeemRelay",
+      "avatarUrl": "",
+      "autoPublish": false,
+      "channelId": "",
+      "enabled": true,
+      "allGames": true,
+      "games": ["hsr", "genshin", "wuwa", "endfield", "nte"],
+      "rolesToTag": [],
+      "usersToTag": [],
+      "customMessage": ""
+    }
+  ],
+  "defaultMessageTemplate": "🎮 **[{{gameName}}] New Code Discovered!**\n\nCode: `{{code}}`\nRewards: {{rewards}}\nServer: {{server}}\nExpiry: {{expires}}\nRedeem Link: [click here]({{redeemUrl}})\n\nTags: {{tags}}"
+}

@@ -1,0 +1,24 @@
+services:
+  redeem-relay:
+    build: .
+    container_name: redeem-relay
+    restart: always
+    ports:
+      - "3000:3000"
+    environment:
+      - PORT=3000
+      - ADMIN_TOKEN=change_me_super_secret_token
+      - POLL_SECONDS=60
+      - DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/your/webhook/url
+      - CAMOFOX_URL=http://camofox:9377
+    volumes:
+      - ./data:/app/data
+    depends_on:
+      - camofox
+
+  camofox:
+    image: ghcr.io/jo-inc/camofox-browser:latest
+    container_name: camofox-browser
+    restart: always
+    ports:
+      - "9377:9377"

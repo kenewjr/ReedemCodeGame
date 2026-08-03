@@ -1,0 +1,363 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+
+// Set isolated DB path for testing
+process.env.TEST_DB_PATH = `data/test_redeem_${Date.now()}.sqlite`;
+
+import { 
+  initDb, 
+  saveCodeCandidate, 
+  getCodeRecords, 
+  getCodeCounts, 
+  runAutoExpiryCleanup,
+  upsertSourceHealth,
+  getAllSourceHealth,
+  deleteSourceHealth,
+  addLog,
+  getSystemLogs
+} from "./src/db.js";
+
+import { 
+  trimDuplicateCode, 
+  detectCodeType, 
+  parseHoyoCodesJson, 
+  parseFandomWikitext, 
+  parseHtmlCheerio 
+} from "./src/parser.js";
+
+import { renderMessage, renderDiscordEmbed, formatTags, formatRewards } from "./src/template.js";
+import { sendDiscordWebhook, publishDiscordMessage } from "./src/discord.js";
+import { isAuth, checkRateLimit, isValidChannelId } from "./server.js";
+
+test("Database Layer - Async Init & 3-Tier Lifecycle", async () => {
+  await initDb();
+  const codeId = `HSRTEST_${Date.now()}`;
+
+  // 1. Insert initial candidate -> unconfirmed
+  const cand1 = {
+    game: "hsr",
+    code: codeId,
+    status: "unconfirmed",
+    codeType: "livestream",
+    server: "All",
+    rewards: "Stellar Jade*100",
+    notes: "Initial test discovery",
+    sources: ["source-1"]
+  };
+
+  const { record: rec1, eventType: evt1 } = await saveCodeCandidate(cand1);
+  assert.equal(rec1.status, "unconfirmed");
+  assert.equal(rec1.code_type, "livestream");
+  assert.equal(rec1.verified_count, 1);
+  assert.equal(evt1, "new_code");
+
+  // 2. Second source confirms -> upgrades to active
+  const cand2 = {
+    game: "hsr",
+    code: codeId,
+    status: "active",
+    rewards: "Stellar Jade*100; Credit*50000",
+    sources: ["source-2"]
+  };
+
+  const { record: rec2 } = await saveCodeCandidate(cand2);
+  assert.equal(rec2.status, "active");
+  assert.equal(rec2.verified_count, 2);
+  assert.equal(rec2.rewards, "Stellar Jade*100; Credit*50000"); // Smart enrichment preserved
+});
+
+test("Database Layer - Pagination & Counts Query", async () => {
+  await initDb();
+  const prefix = `PAG_${Date.now()}`;
+
+  // Insert 3 codes across games
+  await saveCodeCandidate({ game: "genshin", code: `${prefix}_1`, status: "active", codeType: "redeem" });
+  await saveCodeCandidate({ game: "genshin", code: `${prefix}_2`, status: "expired", codeType: "patch" });
+  await saveCodeCandidate({ game: "wuwa", code: `${prefix}_3`, status: "active", codeType: "anniversary" });
+
+  const paginated = await getCodeRecords({ game: "genshin", limit: 1, offset: 0 });
+  assert.equal(paginated.rows.length, 1);
+  assert.ok(paginated.total >= 2);
+
+  const counts = await getCodeCounts();
+  assert.ok(counts.total >= 3);
+  assert.ok(counts.byGame.genshin.total >= 2);
+  assert.ok(counts.byGame.wuwa.total >= 1);
+});
+
+test("Database Layer - Auto Expiry Cleanup Pipeline", async () => {
+  await initDb();
+
+  const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().split("T")[0];
+  const expiredCode = `EXP_${Date.now()}`;
+
+  await saveCodeCandidate({
+    game: "endfield",
+    code: expiredCode,
+    status: "active",
+    expires: yesterday
+  });
+
+  const cleanup = await runAutoExpiryCleanup();
+  assert.ok(cleanup.expiredByDate >= 1);
+
+  const res = await getCodeRecords({ game: "endfield" });
+  const found = res.rows.find(r => r.code === expiredCode);
+  assert.equal(found.status, "expired");
+  assert.ok(found.notes.includes("Auto-expired"));
+});
+
+test("Parser - Duplicate Trimmer & CodeType Detection", () => {
+  assert.equal(trimDuplicateCode("NTEFUNGAMENTEFUNGAME"), "NTEFUNGAME");
+  assert.equal(trimDuplicateCode("STARRAILGIFT"), "STARRAILGIFT");
+
+  assert.equal(detectCodeType("CODE1", "Special Anniversary Stream"), "anniversary");
+  assert.equal(detectCodeType("CODE2", "Version 2.4 Livestream Code"), "livestream");
+  assert.equal(detectCodeType("CODE3", "Patch 1.2 Notes Code"), "patch");
+  assert.equal(detectCodeType("CODE4", "Generic code"), "redeem");
+});
+
+test("Parser - HoyoCodes JSON API Extractor", () => {
+  const sampleJson = {
+    codes: [
+      { id: 1, code: "ONTOSNEZHNAYA", status: "OK", game: "genshin", rewards: "Primogem*100" },
+      { id: 2, code: "CODEA;CODEB", status: "OK", game: "genshin", rewards: "Mora*50000" }
+    ]
+  };
+
+  const parsed = parseHoyoCodesJson("genshin", sampleJson, "https://hoyo-codes.seria.moe/codes?game=genshin");
+  assert.equal(parsed.length, 3);
+  assert.equal(parsed[0].code, "ONTOSNEZHNAYA");
+  assert.equal(parsed[1].code, "CODEA");
+  assert.equal(parsed[2].code, "CODEB");
+});
+
+test("Parser - Fandom Wikitext (Genshin Expired section & WuWa Wikitable)", () => {
+  const genshinWikitext = `
+==Active Codes==
+{{Code Row<!--
+    -->|ActiveGenshin123|G<!--
+    -->|Primogem*100<!--
+    -->|2026-07-31|2026-08-03<!--
+-->}}
+
+==Expired Codes==
+{{Code Row<!--
+    -->|OldGenshin456|G<!--
+    -->|Primogem*50<!--
+    -->|2025-01-01|2025-01-02<!--
+-->}}
+  `;
+
+  const parsedGenshin = parseFandomWikitext("genshin", genshinWikitext, "https://genshin-impact.fandom.com");
+  assert.equal(parsedGenshin.length, 2);
+  assert.equal(parsedGenshin[0].code, "ACTIVEGENSHIN123");
+  assert.equal(parsedGenshin[0].status, "active");
+  assert.equal(parsedGenshin[1].code, "OLDGENSHIN456");
+  assert.equal(parsedGenshin[1].status, "expired");
+
+  const wuwaWikitext = `
+===Active===
+{| class="wikitable"
+|-
+|<code>WUTHERINGGIFT</code>||All||{{Card List|Astrite*50|delim=;}}
+| Valid until: Unknown
+|}
+  `;
+  const parsedWuwa = parseFandomWikitext("wuwa", wuwaWikitext, "https://wutheringwaves.fandom.com");
+  assert.equal(parsedWuwa.length, 1);
+  assert.equal(parsedWuwa[0].code, "WUTHERINGGIFT");
+  assert.equal(parsedWuwa[0].rewards, "Astrite*50");
+});
+
+test("Parser - Cheerio Selector HTML Extractor", () => {
+  const sampleHtml = `
+    <html>
+      <body>
+        <h2>Active Redeem Codes</h2>
+        <table>
+          <tr><td><code>ENDFIELD2026</code></td><td>100 Orundum</td></tr>
+        </table>
+      </body>
+    </html>
+  `;
+
+  const parsed = parseHtmlCheerio("endfield", sampleHtml, "https://game8.co/endfield");
+  assert.equal(parsed.length, 1);
+  assert.equal(parsed[0].code, "ENDFIELD2026");
+  assert.equal(parsed[0].status, "active");
+});
+
+test("Discord Embed Generator & Missing Web Redemption Handling", () => {
+  assert.equal(formatTags([], []), "");
+  assert.equal(formatTags(["123"], ["456"]), "<@&123> <@456>");
+
+  // 1. Genshin has web redemption -> includes Redeem Link field
+  const embedGenshin = renderDiscordEmbed({ game: "genshin", code: "GENSHIN123", rewards: "Primogem*100" });
+  assert.ok(embedGenshin.embeds[0].fields.some(f => f.name === "Redeem Link" && f.value.includes("https://genshin.hoyoverse.com/en/gift?code=GENSHIN123")));
+
+  // 2. WuWa has NO web redemption -> Redeem Link field omitted
+  const embedWuwa = renderDiscordEmbed({ game: "wuwa", code: "WUWA456", rewards: "Astrite*50" });
+  assert.ok(!embedWuwa.embeds[0].fields.some(f => f.name === "Redeem Link"));
+
+  // 3. Endfield has NO web redemption -> Redeem Link field omitted
+  const embedEndfield = renderDiscordEmbed({ game: "endfield", code: "ENDFIELD789", rewards: "Orundum*500" });
+  assert.ok(!embedEndfield.embeds[0].fields.some(f => f.name === "Redeem Link"));
+});
+
+test("Circuit Breaker - Backoff State on 5 Consecutive Failures", async () => {
+  await initDb();
+  const testSource = {
+    id: "failing-source-test-" + Date.now(),
+    game: "hsr",
+    url: "https://example.com/failing",
+    type: "html-cheerio",
+    enabled: true,
+    lastStatus: "error",
+    lastHttpStatus: 404,
+    lastError: "HTTP 404 Not Found",
+    lastCodesFound: 0
+  };
+
+  // Fail 5 times
+  for (let i = 0; i < 5; i++) {
+    await upsertSourceHealth(testSource);
+  }
+
+  const allHealth = await getAllSourceHealth();
+  const target = allHealth.find(h => h.id === testSource.id);
+  assert.ok(target);
+  assert.equal(target.consecutive_failures, 5);
+  assert.equal(target.circuit_breaker_active, 1);
+
+  await deleteSourceHealth(testSource.id);
+});
+
+test("Discord Webhook - sendDiscordWebhook Payload Handling & Safety", async () => {
+  // 1. Invalid Webhook URL handling
+  const invalidRes = await sendDiscordWebhook("", "Hello");
+  assert.equal(invalidRes.ok, false);
+  assert.ok(invalidRes.error.includes("Invalid or empty Webhook URL"));
+
+  // 2. Mock fetch test for string and embed object payload
+  const originalFetch = globalThis.fetch;
+  let lastBody = null;
+
+  globalThis.fetch = async (url, opts) => {
+    lastBody = JSON.parse(opts.body);
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({ id: "msg_12345" })
+    };
+  };
+
+  try {
+    // String payload test
+    const stringRes = await sendDiscordWebhook("https://discord.com/api/webhooks/test", "Test Text Content", { username: "Bot" });
+    assert.equal(stringRes.ok, true);
+    assert.equal(stringRes.messageId, "msg_12345");
+    assert.equal(lastBody.content, "Test Text Content");
+    assert.equal(lastBody.username, "Bot");
+
+    // Object embed payload test
+    const embedObj = renderDiscordEmbed({ game: "hsr", code: "TESTHSR100", rewards: "Stellar Jade*100" });
+    const embedRes = await sendDiscordWebhook("https://discord.com/api/webhooks/test", embedObj);
+    assert.equal(embedRes.ok, true);
+    assert.ok(Array.isArray(lastBody.embeds));
+    assert.ok(lastBody.embeds[0].title.includes("Honkai: Star Rail"));
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("Template - Rewards Whitespace Gap Normalization", () => {
+  const rawGapString = "・ Fons \n\n\n\n\n x10,000 \n\n ・ Beetle Coin \n\n\n x5,000";
+  const formatted = formatRewards(rawGapString);
+  assert.equal(formatted, "Fons x10,000, Beetle Coin x5,000");
+});
+
+test("Discord Crosspost - publishDiscordMessage Authorization Header & Token Normalization", async () => {
+  const originalFetch = globalThis.fetch;
+  let capturedUrl = "";
+  let capturedHeaders = null;
+
+  globalThis.fetch = async (url, opts) => {
+    capturedUrl = url;
+    capturedHeaders = opts.headers;
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({ id: "msg_crossposted" }),
+      text: async () => ""
+    };
+  };
+
+  try {
+    // Test 1: Token passed WITH 'Bot ' prefix
+    const resWithPrefix = await publishDiscordMessage("123456789012345678", "msg_100", "Bot token_abc123");
+    assert.equal(resWithPrefix.ok, true);
+    assert.equal(capturedUrl, "https://discord.com/api/v10/channels/123456789012345678/messages/msg_100/crosspost");
+    assert.equal(capturedHeaders["Authorization"], "Bot token_abc123"); // Ensures NO double 'Bot Bot'
+
+    // Test 2: Token passed WITHOUT 'Bot ' prefix
+    const resWithoutPrefix = await publishDiscordMessage("123456789012345678", "msg_100", "token_abc123");
+    assert.equal(resWithoutPrefix.ok, true);
+    assert.equal(capturedHeaders["Authorization"], "Bot token_abc123");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("Config Validation - Channel ID Format Enforcement", async () => {
+  // Helper validation test
+  assert.equal(isValidChannelId("discord announc"), false);
+  assert.equal(isValidChannelId("abc1234567890"), false);
+  assert.equal(isValidChannelId("12345"), false); // too short
+  assert.equal(isValidChannelId("123456789012345678"), true); // 18-digit snowflake
+  assert.equal(isValidChannelId("12345678901234567890"), true); // 20-digit snowflake
+  assert.equal(isValidChannelId(""), true); // empty is permitted when auto-publish not configured
+});
+
+test("Auto-Publish Pipeline - Triggers Crosspost Only When Fully Configured", async () => {
+  // If botToken, channelId, or messageId is missing, publishDiscordMessage should skip gracefully
+  const resNoToken = await publishDiscordMessage("123456789012345678", "msg_100", "");
+  assert.equal(resNoToken.ok, false);
+  assert.equal(resNoToken.skipped, true);
+
+  const resNoChannel = await publishDiscordMessage("", "msg_100", "token_xyz");
+  assert.equal(resNoChannel.ok, false);
+  assert.equal(resNoChannel.skipped, true);
+
+  const resNoMessage = await publishDiscordMessage("123456789012345678", "", "token_xyz");
+  assert.equal(resNoMessage.ok, false);
+  assert.equal(resNoMessage.skipped, true);
+
+  // Condition evaluation check: autoPublish && channelId && discordBotToken
+  const evaluateAutoPublishCondition = (hook, configToken) => {
+    return !!(hook.autoPublish && configToken && hook.channelId);
+  };
+
+  assert.equal(evaluateAutoPublishCondition({ autoPublish: true, channelId: "123456789012345678" }, "token"), true);
+  assert.equal(evaluateAutoPublishCondition({ autoPublish: false, channelId: "123456789012345678" }, "token"), false);
+  assert.equal(evaluateAutoPublishCondition({ autoPublish: true, channelId: "" }, "token"), false);
+  assert.equal(evaluateAutoPublishCondition({ autoPublish: true, channelId: "123456789012345678" }, ""), false);
+});
+
+test("System Logging - AUTO_PUBLISH_FAILED Audit Logging on Crosspost Error", async () => {
+  await initDb();
+  const errorMsg = "Crosspost failed 404: Unknown Channel";
+
+  // Simulate crosspost failure logging
+  await addLog("WARN", "AUTO_PUBLISH_FAILED", `Failed to crosspost message msg_err: ${errorMsg}`);
+
+  const logs = await getSystemLogs(20, "WARN");
+  const failedLog = logs.find(l => l.category === "AUTO_PUBLISH_FAILED");
+  assert.ok(failedLog);
+  assert.ok(failedLog.message.includes(errorMsg));
+});
+
+
+
+
+

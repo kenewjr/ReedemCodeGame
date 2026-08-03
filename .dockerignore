@@ -1,0 +1,13 @@
+node_modules/
+data/
+.git/
+.github/
+.env
+.env.*
+.gitignore
+.dockerignore
+*.md
+test.js
+PROJECT_MEMORY.md
+.vscode/
+.idea/

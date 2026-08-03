@@ -1,0 +1,33 @@
+# Dependencies
+node_modules/
+
+# Database & runtime data
+data/*.sqlite
+data/*.sqlite-shm
+data/*.sqlite-wal
+data/*.sqlite-journal
+
+# Config with secrets (use config.example.json as template)
+data/config.json
+
+# Environment
+.env
+.env.*
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Logs
+*.log
+npm-debug.log*
+
+# Project memory (internal dev notes)
+PROJECT_MEMORY.md

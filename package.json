@@ -1,0 +1,27 @@
+{
+  "name": "redeem-relay",
+  "version": "2.3.0",
+  "description": "Multi-game redeem code aggregator with SQLite deduplication and Discord webhook notifications",
+  "main": "server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test test.js"
+  },
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "dependencies": {
+    "@libsql/client": "^0.17.4",
+    "camofox-browser": "^2.4.6",
+    "cheerio": "^1.2.0",
+    "sqlite": "^5.1.1",
+    "sqlite3": "^6.0.1"
+  },
+  "allowScripts": {
+    "better-sqlite3@12.11.1": true,
+    "sqlite3@6.0.1": true,
+    "argon2@0.41.1": true,
+    "camofox-browser@2.4.6": true
+  }
+}
