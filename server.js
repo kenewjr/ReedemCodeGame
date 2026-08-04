@@ -485,8 +485,8 @@ const server = http.createServer(async (req, res) => {
           }
         }
       }
-      saveConfig({ ...config, ...body });
-      await addLog("INFO", "CONFIG_UPDATE", "Configuration updated via Admin Dashboard API");
+      saveConfig({ ...loadConfig(), ...body });
+      addLog("INFO", "CONFIG_UPDATE", "Configuration updated via Admin Dashboard API").catch(() => {});
       return sendJson(200, { ok: true, message: "Configuration saved successfully" });
     }
 
@@ -511,10 +511,11 @@ const server = http.createServer(async (req, res) => {
         usersToTag: Array.isArray(body.usersToTag) ? body.usersToTag : [],
         customMessage: body.customMessage || ""
       };
-      const webhooks = config.webhooks || [];
+      const currentCfg = loadConfig();
+      const webhooks = currentCfg.webhooks || [];
       webhooks.push(newWebhook);
-      saveConfig({ ...config, webhooks });
-      await addLog("INFO", "WEBHOOK_CREATED", `Created webhook: ${newWebhook.name}`, { webhookId: newWebhook.id });
+      saveConfig({ ...currentCfg, webhooks });
+      addLog("INFO", "WEBHOOK_CREATED", `Created webhook: ${newWebhook.name}`, { webhookId: newWebhook.id }).catch(() => {});
       return sendJson(201, { ok: true, webhook: newWebhook, message: "Webhook created successfully" });
     }
 
@@ -524,7 +525,8 @@ const server = http.createServer(async (req, res) => {
       if (body.channelId !== undefined && !isValidChannelId(body.channelId)) {
         return sendJson(400, { ok: false, error: "Channel ID format tidak valid. Channel ID harus berupa 17-20 digit angka." });
       }
-      const webhooks = config.webhooks || [];
+      const currentCfg = loadConfig();
+      const webhooks = currentCfg.webhooks || [];
       const idx = webhooks.findIndex(w => w.id === hookId);
 
       if (idx === -1) {
@@ -537,17 +539,18 @@ const server = http.createServer(async (req, res) => {
         id: hookId // Ensure ID remains immutable
       };
 
-      saveConfig({ ...config, webhooks });
-      await addLog("INFO", "WEBHOOK_UPDATED", `Updated webhook ${webhooks[idx].name}`, { webhookId: hookId });
+      saveConfig({ ...currentCfg, webhooks });
+      addLog("INFO", "WEBHOOK_UPDATED", `Updated webhook ${webhooks[idx].name}`, { webhookId: hookId }).catch(() => {});
       return sendJson(200, { ok: true, webhook: webhooks[idx], message: "Webhook updated successfully" });
     }
 
     if (req.method === "DELETE" && url.pathname.startsWith("/api/config/webhooks/")) {
       const hookId = url.pathname.replace("/api/config/webhooks/", "").trim();
-      const webhooks = (config.webhooks || []).filter(w => w.id !== hookId);
+      const currentCfg = loadConfig();
+      const webhooks = (currentCfg.webhooks || []).filter(w => w.id !== hookId);
 
-      saveConfig({ ...config, webhooks });
-      await addLog("INFO", "WEBHOOK_DELETED", `Deleted webhook ID: ${hookId}`);
+      saveConfig({ ...currentCfg, webhooks });
+      addLog("INFO", "WEBHOOK_DELETED", `Deleted webhook ID: ${hookId}`).catch(() => {});
       return sendJson(200, { ok: true, message: `Webhook ${hookId} deleted successfully` });
     }
 

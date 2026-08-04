@@ -708,49 +708,46 @@ async function loadSystemLogs() {
   }
 }
 
-// Load Dashboard Data
+// Load Dashboard Data (Parallel Execution for Fast Page Load)
 async function loadDashboardData() {
   setProgressBar("start");
   try {
-    // Config
-    try {
-      const res = await fetch("/api/config");
-      if (res.ok) {
-        const data = await res.json();
-        const cfg = data.config;
-        document.getElementById("pollSeconds").value = cfg.pollSeconds || 60;
-        document.getElementById("discordBotToken").value = cfg.discordBotToken || "";
-        if (document.getElementById("defaultMessageTemplate")) {
-          document.getElementById("defaultMessageTemplate").value = cfg.defaultMessageTemplate || "";
-        }
+    await Promise.allSettled([
+      // 1. Config
+      fetch("/api/config")
+        .then(r => r.ok ? r.json() : null)
+        .then(data => {
+          if (!data) return;
+          const cfg = data.config;
+          document.getElementById("pollSeconds").value = cfg.pollSeconds || 60;
+          document.getElementById("discordBotToken").value = cfg.discordBotToken || "";
+          if (document.getElementById("defaultMessageTemplate")) {
+            document.getElementById("defaultMessageTemplate").value = cfg.defaultMessageTemplate || "";
+          }
+          cachedWebhooks = cfg.webhooks || [];
+          renderWebhooksList();
+        })
+        .catch(err => console.error("Config fetch error:", err)),
 
-        cachedWebhooks = cfg.webhooks || [];
-        renderWebhooksList();
-      }
-    } catch (err) {
-      console.error("Config fetch error:", err);
-    }
+      // 2. Sources Health
+      fetch("/api/public/sources")
+        .then(r => r.ok ? r.json() : null)
+        .then(data => {
+          if (!data) return;
+          cachedSources = data.data || [];
+          renderSourcesTable();
+        })
+        .catch(err => console.error("Sources fetch error:", err)),
 
-    // Sources Health
-    try {
-      const res = await fetch("/api/public/sources");
-      if (res.ok) {
-        const data = await res.json();
-        cachedSources = data.data || [];
-        renderSourcesTable();
-      }
-    } catch (err) {
-      console.error("Sources fetch error:", err);
-    }
+      // 3. Counts
+      loadCodeCounts(),
 
-    // Counts
-    await loadCodeCounts();
+      // 4. Codes Feed
+      loadCodesFeed(),
 
-    // Codes Feed
-    await loadCodesFeed();
-
-    // Logs
-    await loadSystemLogs();
+      // 5. Logs
+      loadSystemLogs()
+    ]);
   } finally {
     setProgressBar("stop");
   }

@@ -35,12 +35,19 @@ function getStealthHeaders(targetUrl) {
   };
 }
 
+let camofoxOfflineUntil = 0;
+
 async function fetchViaCamofox(targetUrl, camofoxUrl) {
+  // If Camofox marked offline due to recent connection error/timeout, skip immediately
+  if (Date.now() < camofoxOfflineUntil) {
+    throw new Error("Camofox is currently offline/unreachable (circuit breaker)");
+  }
+
   const endpoint = camofoxUrl.endsWith("/") ? `${camofoxUrl}snapshot` : `${camofoxUrl}/snapshot`;
   const urlWithQuery = `${endpoint}?url=${encodeURIComponent(targetUrl)}`;
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 15000); // 15s timeout for browser rendering
+  const timeout = setTimeout(() => controller.abort(), 4000); // 4s fast timeout for Camofox
 
   try {
     const res = await fetch(urlWithQuery, {
@@ -74,13 +81,15 @@ async function fetchViaCamofox(targetUrl, camofoxUrl) {
     };
   } catch (err) {
     clearTimeout(timeout);
+    // Mark Camofox offline for 2 minutes on connection error or timeout
+    camofoxOfflineUntil = Date.now() + 2 * 60 * 1000;
     throw err;
   }
 }
 
 export async function fetchWithBypass(url, options = {}) {
-  const maxRetries = options.maxRetries || 2;
-  const timeoutMs = options.timeoutMs || 10000;
+  const maxRetries = options.maxRetries || 1;
+  const timeoutMs = options.timeoutMs || 5000; // 5s timeout
   const camofoxUrl = process.env.CAMOFOX_URL || options.camofoxUrl || "";
 
   let lastError = null;
@@ -90,8 +99,8 @@ export async function fetchWithBypass(url, options = {}) {
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
       if (attempt > 0) {
-        // Random backoff jitter: 300ms - 800ms
-        const jitter = Math.floor(Math.random() * 500) + 300;
+        // Random backoff jitter: 200ms - 500ms
+        const jitter = Math.floor(Math.random() * 300) + 200;
         await new Promise(r => setTimeout(r, jitter * attempt));
       }
 
@@ -135,7 +144,7 @@ export async function fetchWithBypass(url, options = {}) {
   }
 
   // Tier 2 Fallback: If native fetch failed or timed out and Camofox is available, try Camofox as last resort
-  if (camofoxUrl) {
+  if (camofoxUrl && Date.now() >= camofoxOfflineUntil) {
     try {
       return await fetchViaCamofox(url, camofoxUrl);
     } catch {}
