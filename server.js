@@ -1,6 +1,7 @@
 import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
+import zlib from "node:zlib";
 import crypto from "node:crypto";
 import { loadConfig, saveConfig } from "./src/state.js";
 import { SOURCES } from "./src/sources.js";
@@ -337,7 +338,7 @@ const server = http.createServer(async (req, res) => {
     });
   });
 
-  // Serve static UI & Docs
+  // Serve static UI & Docs (with gzip + cache headers)
   if (req.method === "GET" && !url.pathname.startsWith("/api")) {
     let filePath = "";
     if (url.pathname.startsWith("/docs/")) {
@@ -352,14 +353,30 @@ const server = http.createServer(async (req, res) => {
       }
       const ext = path.extname(filePath);
       const mimeTypes = {
-        ".html": "text/html",
-        ".css": "text/css",
-        ".js": "application/javascript",
+        ".html": "text/html; charset=utf-8",
+        ".css": "text/css; charset=utf-8",
+        ".js": "application/javascript; charset=utf-8",
         ".md": "text/markdown; charset=utf-8",
         ".json": "application/json"
       };
       const content = await fs.promises.readFile(filePath);
-      res.writeHead(200, { "Content-Type": mimeTypes[ext] || "text/plain" });
+      const contentType = mimeTypes[ext] || "text/plain";
+      // Cache static assets (CSS/JS) for 1h, HTML for 0 (always revalidate)
+      const cacheControl = ext === ".html" ? "no-cache" : "public, max-age=3600";
+      const acceptEncoding = req.headers["accept-encoding"] || "";
+
+      if (acceptEncoding.includes("gzip") && [".html", ".css", ".js", ".json", ".md"].includes(ext)) {
+        const compressed = zlib.gzipSync(content);
+        res.writeHead(200, {
+          "Content-Type": contentType,
+          "Content-Encoding": "gzip",
+          "Cache-Control": cacheControl,
+          "Vary": "Accept-Encoding"
+        });
+        return res.end(compressed);
+      }
+
+      res.writeHead(200, { "Content-Type": contentType, "Cache-Control": cacheControl });
       return res.end(content);
     } catch {
       res.writeHead(404, { "Content-Type": "text/plain" });
@@ -643,7 +660,8 @@ if (!process.env.TEST_DB_PATH) {
       }, (loadConfig().pollSeconds || 60) * 1000);
 
       // Run initial poll after 1.5s
-      setTimeout(runPoll, 1500);
+      // ponytail: 5s delay lets camofox fully ready in Docker; lower if running standalone
+      setTimeout(runPoll, 5000);
     });
   }).catch(err => {
     console.error("Failed to initialize database:", err);

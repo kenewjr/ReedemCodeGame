@@ -13,7 +13,8 @@ services:
     volumes:
       - ./data:/app/data
     depends_on:
-      - camofox
+      camofox:
+        condition: service_healthy
 
   camofox:
     image: ghcr.io/jo-inc/camofox-browser:latest
@@ -21,3 +22,9 @@ services:
     restart: always
     ports:
       - "9377:9377"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:9377/ || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 15s

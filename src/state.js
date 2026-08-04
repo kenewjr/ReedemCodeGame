@@ -26,18 +26,24 @@ export const DEFAULT_CONFIG = {
   defaultMessageTemplate: "🎮 **[{{gameName}}] New Code Discovered!**\n\nCode: `{{code}}`\nRewards: {{rewards}}\nServer: {{server}}\nExpiry: {{expires}}\nRedeem Link: {{redeemUrl}}\n\nTags: {{tags}}"
 };
 
+// ponytail: in-memory cache eliminates per-request sync I/O; upgrade to file watcher if multi-process
+let _cachedConfig = null;
+
 export function loadConfig() {
+  if (_cachedConfig) return _cachedConfig;
   if (!fs.existsSync(CONFIG_PATH)) {
     saveConfig(DEFAULT_CONFIG);
-    return DEFAULT_CONFIG;
+    return _cachedConfig;
   }
   try {
     const raw = fs.readFileSync(CONFIG_PATH, "utf8");
     const parsed = JSON.parse(raw);
-    return { ...DEFAULT_CONFIG, ...parsed };
+    _cachedConfig = { ...DEFAULT_CONFIG, ...parsed };
+    return _cachedConfig;
   } catch (err) {
     console.error("Failed to parse config.json, using defaults:", err);
-    return DEFAULT_CONFIG;
+    _cachedConfig = DEFAULT_CONFIG;
+    return _cachedConfig;
   }
 }
 
@@ -47,4 +53,6 @@ export function saveConfig(cfg) {
     fs.mkdirSync(dir, { recursive: true });
   }
   fs.writeFileSync(CONFIG_PATH, JSON.stringify(cfg, null, 2), "utf8");
+  _cachedConfig = cfg;
 }
+
