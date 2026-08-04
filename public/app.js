@@ -464,22 +464,22 @@ function renderWebhooksList() {
           <label class="font-bold text-xs">Target Games for this Webhook:</label>
           <div class="checkbox-group mt-4">
             <label class="checkbox-label text-xs">
-              <input type="checkbox" class="hook-all-games" ${allGamesChecked ? 'checked' : ''}> All Games
+              <input type="checkbox" class="hook-all-games" ${allGamesChecked ? 'checked' : ''} onchange="handleAllGamesChange(this)"> All Games
             </label>
             <label class="checkbox-label text-xs">
-              <input type="checkbox" class="hook-game-hsr" ${hookGames.includes('hsr') ? 'checked' : ''}> HSR
+              <input type="checkbox" class="hook-game-hsr" ${hookGames.includes('hsr') ? 'checked' : ''} onchange="handleGameChange(this)"> HSR
             </label>
             <label class="checkbox-label text-xs">
-              <input type="checkbox" class="hook-game-genshin" ${hookGames.includes('genshin') ? 'checked' : ''}> Genshin
+              <input type="checkbox" class="hook-game-genshin" ${hookGames.includes('genshin') ? 'checked' : ''} onchange="handleGameChange(this)"> Genshin
             </label>
             <label class="checkbox-label text-xs">
-              <input type="checkbox" class="hook-game-wuwa" ${hookGames.includes('wuwa') ? 'checked' : ''}> WuWa
+              <input type="checkbox" class="hook-game-wuwa" ${hookGames.includes('wuwa') ? 'checked' : ''} onchange="handleGameChange(this)"> WuWa
             </label>
             <label class="checkbox-label text-xs">
-              <input type="checkbox" class="hook-game-endfield" ${hookGames.includes('endfield') ? 'checked' : ''}> Endfield
+              <input type="checkbox" class="hook-game-endfield" ${hookGames.includes('endfield') ? 'checked' : ''} onchange="handleGameChange(this)"> Endfield
             </label>
             <label class="checkbox-label text-xs">
-              <input type="checkbox" class="hook-game-nte" ${hookGames.includes('nte') ? 'checked' : ''}> NTE
+              <input type="checkbox" class="hook-game-nte" ${hookGames.includes('nte') ? 'checked' : ''} onchange="handleGameChange(this)"> NTE
             </label>
           </div>
         </div>
@@ -546,6 +546,71 @@ function renderWebhooksList() {
 
   document.getElementById("statWebhooksCount").innerText = cachedWebhooks.filter(w => w.enabled && w.url).length;
 }
+
+// All Games Checkbox Logic
+function handleAllGamesChange(checkbox) {
+  const card = checkbox.closest('.webhook-card-item');
+  if (!card) return;
+  
+  const gameCheckboxes = card.querySelectorAll('.hook-game-hsr, .hook-game-genshin, .hook-game-wuwa, .hook-game-endfield, .hook-game-nte');
+  const isChecked = checkbox.checked;
+  
+  gameCheckboxes.forEach(cb => {
+    cb.disabled = isChecked;
+    if (isChecked) {
+      cb.checked = false;
+      cb.parentElement.style.opacity = '0.5';
+    } else {
+      cb.parentElement.style.opacity = '1';
+    }
+  });
+  
+  if (isChecked) {
+    showToast("info", "All Games Selected", "This webhook will trigger for all games. Individual game selection disabled.", 2000);
+  } else {
+    showToast("info", "Custom Games", "Select specific games for this webhook.", 2000);
+  }
+}
+
+function handleGameChange(checkbox) {
+  const card = checkbox.closest('.webhook-card-item');
+  if (!card) return;
+  
+  const allGamesCheckbox = card.querySelector('.hook-all-games');
+  const gameCheckboxes = card.querySelectorAll('.hook-game-hsr, .hook-game-genshin, .hook-game-wuwa, .hook-game-endfield, .hook-game-nte');
+  const checkedGames = card.querySelectorAll('.hook-game-hsr:checked, .hook-game-genshin:checked, .hook-game-wuwa:checked, .hook-game-endfield:checked, .hook-game-nte:checked');
+  
+  // If any game is checked, uncheck All Games
+  if (checkbox.checked && allGamesCheckbox) {
+    allGamesCheckbox.checked = false;
+  }
+  
+  // Update opacity based on selection
+  gameCheckboxes.forEach(cb => {
+    cb.parentElement.style.opacity = cb.disabled ? '0.5' : '1';
+  });
+  
+  const gameNames = {
+    'hsr': 'HSR',
+    'genshin': 'Genshin',
+    'wuwa': 'WuWa',
+    'endfield': 'Endfield',
+    'nte': 'NTE'
+  };
+  
+  const selectedGames = Array.from(checkedGames).map(cb => {
+    const className = Array.from(cb.classList).find(c => c.startsWith('hook-game-'));
+    return gameNames[className?.replace('hook-game-', '')] || 'Unknown';
+  });
+  
+  if (selectedGames.length > 0) {
+    showToast("info", "Games Selected", `Selected: ${selectedGames.join(', ')}`, 2000);
+  }
+}
+
+// Make functions globally accessible
+window.handleAllGamesChange = handleAllGamesChange;
+window.handleGameChange = handleGameChange;
 
 function toggleWebhookCard(index, event) {
   if (event && (event.target.tagName === 'BUTTON' || event.target.closest('button') || event.target.tagName === 'INPUT')) {
