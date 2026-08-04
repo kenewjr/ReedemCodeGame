@@ -4,7 +4,6 @@ import path from "node:path";
 const CONFIG_PATH = path.resolve("data/config.json");
 
 export const DEFAULT_CONFIG = {
-  adminToken: process.env.ADMIN_TOKEN || "change_me_super_secret_token",
   pollSeconds: parseInt(process.env.POLL_SECONDS || "60", 10),
   games: {
     hsr: { enabled: true },

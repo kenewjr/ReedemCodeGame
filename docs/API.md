@@ -1,13 +1,13 @@
-# RedeemRelay REST API Documentation (v2.3)
+# RedeemRelay REST API Documentation (v2.4)
 
-## 1. Public Read-Only APIs (Rate Limited: 60 req/min per IP)
+## 1. Public Read-Only & Manual Code APIs (Rate Limited: 60 req/min per IP)
 
 ### `GET /api/version`
 Returns current app version from `package.json`.
 
 **Response:**
 ```json
-{ "ok": true, "version": "2.3.0" }
+{ "ok": true, "version": "2.4.0" }
 ```
 
 ---
@@ -134,24 +134,25 @@ System audit logs.
 
 ---
 
-### `POST /api/public/verify-token`
-Validate admin token.
+### `POST /api/manual-code`
+Insert code manually. Manual codes are protected from auto-expiry-by-absence.
 
 **Body:**
 ```json
-{ "token": "your_admin_token" }
-```
-
-**Response:**
-```json
-{ "ok": true, "valid": true }
+{
+  "game": "hsr",
+  "code": "STARRAIL2026",
+  "codeType": "livestream",
+  "rewards": "Stellar Jade x100",
+  "server": "All",
+  "expires": "2026-12-31",
+  "notes": "Version 2.5 stream code"
+}
 ```
 
 ---
 
-## 2. Admin APIs (Protected: `Authorization: Bearer <adminToken>`)
-
-All admin endpoints return `401` if token is missing or invalid.
+## 2. Management & Configuration APIs
 
 ### `GET /api/config`
 Returns full config.
@@ -204,37 +205,6 @@ Send test message to a webhook URL.
   "url": "https://discord.com/api/webhooks/...",
   "message": "🔔 Test from RedeemRelay!",
   "username": "Test Bot"
-}
-```
-
----
-
-### `POST /api/manual-code`
-Insert code manually. Manual codes are protected from auto-expiry-by-absence.
-
-**Body:**
-```json
-{
-  "game": "hsr",
-  "code": "STARRAIL2026",
-  "codeType": "livestream",
-  "rewards": "Stellar Jade x100",
-  "server": "All",
-  "expires": "2026-12-31",
-  "notes": "Version 2.5 stream code"
-}
-```
-
-### `PUT /api/admin/code`
-Override code attributes (`status`, `codeType`, `notes`, `needsReview`).
-
-**Body:**
-```json
-{
-  "game": "hsr",
-  "code": "STARRAIL2026",
-  "status": "expired",
-  "notes": "Manually expired by admin"
 }
 ```
 

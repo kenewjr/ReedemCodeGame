@@ -1,5 +1,4 @@
 {
-  "adminToken": "change_me_super_secret_token",
   "pollSeconds": 60,
   "discordBotToken": "",
   "games": {

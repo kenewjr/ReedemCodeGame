@@ -76,7 +76,6 @@ All settings live in `data/config.json`. See [config.example.json](data/config.e
 
 | Key | Description |
 |-----|-------------|
-| `adminToken` | Password for Dashboard UI & Admin API |
 | `pollSeconds` | Scrape interval in seconds (default: 60) |
 | `discordBotToken` | Optional — required only for Announcement Channel auto-publish |
 | `webhooks[]` | Array of Discord webhook configs (URL, username, avatar, game filter, tags, etc.) |
@@ -95,7 +94,6 @@ Each webhook supports:
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `PORT` | `3000` | HTTP server port |
-| `ADMIN_TOKEN` | — | Overrides `config.json` adminToken |
 | `POLL_SECONDS` | `60` | Overrides `config.json` pollSeconds |
 | `DISCORD_WEBHOOK_URL` | — | Default webhook URL fallback |
 | `CAMOFOX_URL` | — | Camofox browser endpoint (e.g. `http://camofox:9377`) |
@@ -105,7 +103,7 @@ Each webhook supports:
 
 Full documentation: **[docs/API.md](docs/API.md)**
 
-### Public (rate-limited 60 req/min)
+### Code & System APIs
 
 | Endpoint | Description |
 |----------|-------------|
@@ -116,9 +114,9 @@ Full documentation: **[docs/API.md](docs/API.md)**
 | `GET /api/public/sources` | Source health status |
 | `GET /api/public/games` | Game registry metadata |
 | `GET /api/public/logs` | System audit logs |
-| `POST /api/public/verify-token` | Validate admin token |
+| `POST /api/manual-code` | Insert code manually |
 
-### Admin (requires `Authorization: Bearer <token>`)
+### Management & Control APIs
 
 | Endpoint | Description |
 |----------|-------------|
@@ -127,8 +125,6 @@ Full documentation: **[docs/API.md](docs/API.md)**
 | `PUT/DELETE /api/config/webhooks/:id` | Update/delete webhook |
 | `POST /api/run-now` | Trigger manual poll |
 | `POST /api/test-webhook` | Send test message |
-| `POST /api/manual-code` | Insert code manually |
-| `PUT /api/admin/code` | Override code attributes |
 | `POST /api/force-send` | Force-broadcast codes to webhooks |
 
 ## Testing

@@ -27,7 +27,7 @@ import {
 
 import { renderMessage, renderDiscordEmbed, formatTags, formatRewards } from "./src/template.js";
 import { sendDiscordWebhook, publishDiscordMessage } from "./src/discord.js";
-import { isAuth, checkRateLimit, isValidChannelId } from "./server.js";
+import { checkRateLimit, isValidChannelId } from "./server.js";
 
 test("Database Layer - Async Init & 3-Tier Lifecycle", async () => {
   await initDb();

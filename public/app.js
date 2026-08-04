@@ -1,5 +1,4 @@
 // Enterprise Dashboard Frontend Logic v2.0.0
-let adminToken = sessionStorage.getItem("adminToken") || "jawa";
 let cachedCodes = [];
 let cachedSources = [];
 let cachedLogs = [];
@@ -12,51 +11,38 @@ const pageSize = 50;
 let totalCodesCount = 0;
 
 // Embedded API Documentation
-const EMBEDDED_DOCS_MD = `# RedeemRelay v2.0 API Documentation
+const EMBEDDED_DOCS_MD = `# RedeemRelay REST API Documentation
 
-Aplikasi ini menyediakan dua kategori API: **Public API** (Read-Only with Rate Limiting) dan **Admin API** (Protected via Constant-time Auth).
+Aplikasi ini menyediakan REST API tanpa proteksi token untuk manajemen kode redeem dan webhook:
 
 ---
 
-## 1. Public API (Read-Only)
-
 ### \`GET /api/public/codes\`
 Mengambil daftar kode redeem dengan dukungan pagination dan filter game/status/code_type.
-- **Query Params**:
-  - \`game\` (hsr | genshin | wuwa | endfield | nte)
-  - \`status\` (active | expired | unconfirmed)
-  - \`code_type\` (redeem | anniversary | livestream | patch)
-  - \`limit\` (default 200, max 1000)
-  - \`offset\` (default 0)
 
 ### \`GET /api/public/codes/count\`
 Mengambil breakdown total count asli per game dan status dari database.
 
 ### \`GET /api/public/sources\`
-Mengambil status kesehatan dari 18+ sumber scraper (HTTP status, consecutive failures, codes found).
+Mengambil status kesehatan dari sumber scraper.
 
 ### \`GET /api/public/games\`
-Mengambil daftar registry 5 game dan metadata redeem link.
+Mengambil daftar registry 5 game dan metadata.
 
 ### \`GET /api/public/logs\`
-Mengambil audit logs sistem (\`?limit=100&level=ERROR\`).
-
----
-
-## 2. Admin API (Protected)
-Authorization: \`Bearer <adminToken>\`
-
-### \`POST /api/force-send\`
-Mengirim paksa ulang kode ke Webhook tanpa terhalang deduplikasi DB.
-
-### \`PUT /api/config\`
-Memperbarui konfigurasi (interval, discordBotToken, multiple webhooks, autoPublish, channelId, game toggles).
-
-### \`POST /api/test-webhook\`
-Menguji pengiriman payload ke Webhook URL tertentu (dengan custom username & avatar_url).
+Mengambil audit logs sistem.
 
 ### \`POST /api/manual-code\`
-Input kode manual (\`is_manual = 1\`, \`codeType\`, \`status\`, \`notes\`).
+Input kode manual.
+
+### \`POST /api/force-send\`
+Mengirim paksa ulang kode ke Webhook.
+
+### \`PUT /api/config\`
+Memperbarui konfigurasi.
+
+### \`POST /api/test-webhook\`
+Menguji pengiriman payload ke Webhook URL.
 `;
 
 // Toast System
@@ -99,79 +85,7 @@ function setProgressBar(state) {
   }
 }
 
-// Fetch Helper with Auth
-async function fetchWithAuth(url, options = {}) {
-  const headers = { ...options.headers };
-  const inputVal = document.getElementById("adminTokenInput")?.value.trim();
-  const activeToken = adminToken || inputVal || "jawa";
 
-  if (activeToken) {
-    headers["Authorization"] = `Bearer ${activeToken}`;
-  }
-  return fetch(url, { ...options, headers });
-}
-
-// Verify Admin Token
-async function verifyAdminToken(token) {
-  if (!token) return false;
-  try {
-    const res = await fetch("/api/public/verify-token", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ token })
-    });
-    const data = await res.json();
-    return !!data.valid;
-  } catch {
-    return false;
-  }
-}
-
-async function updateAuthUI() {
-  const tokenInput = document.getElementById("adminTokenInput");
-  const authDot = document.getElementById("authDot");
-  const tokenToTest = tokenInput?.value.trim() || adminToken;
-
-  if (tokenToTest) {
-    const isValid = await verifyAdminToken(tokenToTest);
-    if (isValid) {
-      adminToken = tokenToTest;
-      sessionStorage.setItem("adminToken", adminToken);
-      if (authDot) {
-        authDot.className = "auth-status-dot connected";
-        authDot.title = "Connected: Token Valid";
-      }
-    } else if (authDot) {
-      authDot.className = "auth-status-dot disconnected";
-      authDot.title = "Disconnected: Token Invalid";
-    }
-  } else if (authDot) {
-    authDot.className = "auth-status-dot disconnected";
-    authDot.title = "Disconnected: No Token Set";
-  }
-}
-
-document.getElementById("adminTokenInput")?.addEventListener("input", (e) => {
-  adminToken = e.target.value.trim();
-  sessionStorage.setItem("adminToken", adminToken);
-  updateAuthUI();
-});
-
-document.getElementById("saveTokenBtn")?.addEventListener("click", async () => {
-  const input = document.getElementById("adminTokenInput");
-  adminToken = input.value.trim();
-  sessionStorage.setItem("adminToken", adminToken);
-
-  const isValid = await verifyAdminToken(adminToken);
-  await updateAuthUI();
-
-  if (isValid) {
-    showToast("success", "Connected", "Admin Bearer token verified!");
-    loadDashboardData();
-  } else {
-    showToast("error", "Invalid Token", `Token "${adminToken}" does not match server adminToken.`);
-  }
-});
 
 // Tab Navigation
 document.querySelectorAll(".nav-item[data-tab]").forEach(btn => {
@@ -647,7 +561,7 @@ async function addWebhookCard() {
   };
 
   try {
-    const res = await fetchWithAuth("/api/config/webhooks", {
+    const res = await fetch("/api/config/webhooks", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(newHook)
@@ -707,7 +621,7 @@ async function saveSingleWebhook(index) {
   };
 
   try {
-    const res = await fetchWithAuth(`/api/config/webhooks/${hookId}`, {
+    const res = await fetch(`/api/config/webhooks/${hookId}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload)
@@ -731,7 +645,7 @@ async function deleteSingleWebhook(index) {
   if (!confirm(`Are you sure you want to delete Webhook #${index + 1}?`)) return;
 
   try {
-    const res = await fetchWithAuth(`/api/config/webhooks/${hookId}`, {
+    const res = await fetch(`/api/config/webhooks/${hookId}`, {
       method: "DELETE"
     });
     if (res.ok) {
@@ -756,7 +670,7 @@ async function testSingleWebhook(index) {
   if (!url) return showToast("warning", "Missing URL", "Please enter a Discord Webhook URL first.");
 
   try {
-    const res = await fetchWithAuth("/api/test-webhook", {
+    const res = await fetch("/api/test-webhook", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ url, username, avatarUrl })
@@ -800,7 +714,7 @@ async function loadDashboardData() {
   try {
     // Config
     try {
-      const res = await fetchWithAuth("/api/config");
+      const res = await fetch("/api/config");
       if (res.ok) {
         const data = await res.json();
         const cfg = data.config;
@@ -871,7 +785,7 @@ document.getElementById("globalConfigForm")?.addEventListener("submit", async (e
   };
 
   try {
-    const res = await fetchWithAuth("/api/config", {
+    const res = await fetch("/api/config", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload)
@@ -901,7 +815,7 @@ document.getElementById("manualCodeForm")?.addEventListener("submit", async (e) 
   const rewards = document.getElementById("manualRewards").value.trim();
 
   try {
-    const res = await fetchWithAuth("/api/manual-code", {
+    const res = await fetch("/api/manual-code", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ game, code, codeType, rewards })
@@ -913,7 +827,7 @@ document.getElementById("manualCodeForm")?.addEventListener("submit", async (e) 
       document.getElementById("manualRewards").value = "";
       loadDashboardData();
     } else {
-      showToast("error", "Add Failed", "Unauthorized token or invalid input.");
+      showToast("error", "Add Failed", "Invalid input or server error.");
     }
   } catch (err) {
     showToast("error", "Error", err.message);
@@ -935,7 +849,7 @@ document.getElementById("btnForceSend")?.addEventListener("click", async () => {
 
   setButtonLoading(btn, true);
   try {
-    const res = await fetchWithAuth("/api/force-send", {
+    const res = await fetch("/api/force-send", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ game, status, webhookId: "all" })
@@ -1004,7 +918,7 @@ document.getElementById("runNowBtn")?.addEventListener("click", async () => {
   setButtonLoading(btn, true);
 
   try {
-    const res = await fetchWithAuth("/api/run-now", { method: "POST" });
+    const res = await fetch("/api/run-now", { method: "POST" });
     if (res.ok) {
       showToast("info", "Poll Started", "Live scrape initialized. Tracking progress...");
       pollRunStatus(btn);
@@ -1092,7 +1006,6 @@ function initMobileSidebar() {
 // Initial Run
 initTabNavigation();
 initMobileSidebar();
-updateAuthUI();
 loadVersion();
 loadDashboardData();
 

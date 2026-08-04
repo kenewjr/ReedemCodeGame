@@ -69,20 +69,7 @@ setInterval(() => {
   }
 }, 5 * 60 * 1000);
 
-// Constant-time authentication middleware
-function isAuth(req, config) {
-  const authHeader = req.headers["authorization"] || "";
-  const token = authHeader.replace(/^Bearer\s+/i, "").trim();
-  const expectedToken = (config.adminToken || "").trim();
 
-  if (!token || !expectedToken) return false;
-
-  const bufToken = Buffer.from(token);
-  const bufExpected = Buffer.from(expectedToken);
-
-  if (bufToken.length !== bufExpected.length) return false;
-  return crypto.timingSafeEqual(bufToken, bufExpected);
-}
 
 // Channel ID format validator (must be empty or 17-20 digit numeric snowflake)
 function isValidChannelId(channelId) {
@@ -439,18 +426,34 @@ const server = http.createServer(async (req, res) => {
       return sendJson(200, { ok: true, data: logs });
     }
 
-    if (req.method === "POST" && url.pathname === "/api/public/verify-token") {
-      const body = await readBody();
-      const isValid = isAuth({ headers: { authorization: `Bearer ${body.token || ""}` } }, config);
-      return sendJson(200, { ok: true, valid: isValid });
-    }
   }
 
-  // --- ADMIN APIs (Protected via Constant-time Auth) ---
-  if (url.pathname.startsWith("/api/admin") || url.pathname.startsWith("/api/config") || ["/api/run-now", "/api/test-webhook", "/api/manual-code", "/api/force-send"].includes(url.pathname)) {
-    if (!isAuth(req, config)) {
-      return sendJson(401, { ok: false, error: "Unauthorized. Invalid Admin Bearer Token." });
+  if (req.method === "POST" && url.pathname === "/api/manual-code") {
+    const body = await readBody();
+    if (!body.game || !body.code) {
+      return sendJson(400, { ok: false, error: "Missing required game or code" });
     }
+
+    const cand = {
+      game: body.game,
+      code: body.code.trim().toUpperCase(),
+      status: body.status || "active",
+      codeType: body.codeType || "redeem",
+      server: body.server || "All",
+      rewards: body.rewards || "",
+      expires: body.expires || "",
+      notes: body.notes || "Manually inserted code",
+      isManual: true,
+      sources: ["manual-entry"]
+    };
+
+    const resData = await saveCodeCandidate(cand);
+    await addLog("INFO", "MANUAL_CODE", `Manually added code ${cand.code} for ${cand.game}`);
+    return sendJson(200, { ok: true, data: resData });
+  }
+
+  // --- MANAGEMENT APIs ---
+  if (url.pathname.startsWith("/api/config") || ["/api/run-now", "/api/test-webhook", "/api/force-send"].includes(url.pathname)) {
 
     if (req.method === "GET" && url.pathname === "/api/config") {
       return sendJson(200, { ok: true, config });
@@ -548,50 +551,7 @@ const server = http.createServer(async (req, res) => {
       return sendJson(200, result);
     }
 
-    if (req.method === "POST" && url.pathname === "/api/manual-code") {
-      const body = await readBody();
-      if (!body.game || !body.code) {
-        return sendJson(400, { ok: false, error: "Missing required game or code" });
-      }
 
-      const cand = {
-        game: body.game,
-        code: body.code.trim().toUpperCase(),
-        status: body.status || "active",
-        codeType: body.codeType || "redeem",
-        server: body.server || "All",
-        rewards: body.rewards || "",
-        expires: body.expires || "",
-        notes: body.notes || "Manually inserted via Admin Dashboard",
-        isManual: true,
-        sources: ["manual-entry"]
-      };
-
-      const resData = await saveCodeCandidate(cand);
-      await addLog("INFO", "MANUAL_CODE", `Manually added code ${cand.code} for ${cand.game}`);
-      return sendJson(200, { ok: true, data: resData });
-    }
-
-    if (req.method === "PUT" && url.pathname === "/api/admin/code") {
-      const body = await readBody();
-      if (!body.game || !body.code) {
-        return sendJson(400, { ok: false, error: "Missing game or code" });
-      }
-      const resData = await saveCodeCandidate({
-        game: body.game,
-        code: body.code,
-        status: body.status,
-        codeType: body.codeType,
-        server: body.server,
-        rewards: body.rewards,
-        expires: body.expires,
-        notes: body.notes,
-        needsReview: body.needsReview,
-        isManual: body.isManual
-      });
-      await addLog("INFO", "ADMIN_CODE_UPDATE", `Admin updated attributes for ${body.code}`);
-      return sendJson(200, { ok: true, data: resData });
-    }
 
     if (req.method === "POST" && url.pathname === "/api/force-send") {
       const body = await readBody();
@@ -690,4 +650,4 @@ if (!process.env.TEST_DB_PATH) {
   });
 }
 
-export { server, isAuth, checkRateLimit, isValidChannelId };
+export { server, checkRateLimit, isValidChannelId };
