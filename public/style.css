@@ -1325,3 +1325,30 @@ body {
     gap: 12px;
   }
 }
+
+
+/* Fix Checkbox Spacing */
+.checkbox-group {
+  padding: 20px !important;
+  margin-top: 16px !important;
+  display: grid !important;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)) !important;
+  gap: 12px !important;
+}
+
+/* Ensure checkbox labels render properly */
+.checkbox-label {
+  width: 100% !important;
+  flex: none !important;
+  padding: 12px !important;
+}
+
+/* Button Notification Improvements */
+.btn-active {
+  animation: btnPulse 0.5s ease;
+}
+
+@keyframes btnPulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(0.98); }
+}

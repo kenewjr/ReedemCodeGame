@@ -461,25 +461,36 @@ function renderWebhooksList() {
 
         <!-- Game Scope Selection -->
         <div class="form-group mt-12">
-          <label class="font-bold text-xs">Target Games for this Webhook:</label>
-          <div class="checkbox-group mt-4">
-            <label class="checkbox-label text-xs">
-              <input type="checkbox" class="hook-all-games" ${allGamesChecked ? 'checked' : ''} onchange="handleAllGamesChange(this)"> All Games
+          <label class="font-bold text-xs mb-8 block">Target Games for this Webhook:</label>
+          <div class="checkbox-group mt-4 p-4 rounded-lg bg-black/20 border border-border-color">
+            <label class="checkbox-label flex items-center gap-2 cursor-pointer select-none">
+              <input type="checkbox" class="hook-all-games accent-indigo w-5 h-5 mr-2" ${allGamesChecked ? 'checked' : ''} onchange="handleAllGamesChange(this)"> 
+              <span>All Games</span>
             </label>
-            <label class="checkbox-label text-xs">
-              <input type="checkbox" class="hook-game-hsr" ${hookGames.includes('hsr') ? 'checked' : ''} onchange="handleGameChange(this)"> HSR
+            
+            <label class="checkbox-label flex items-center gap-2 cursor-pointer select-none">
+              <input type="checkbox" class="hook-game-hsr accent-indigo w-5 h-5 mr-2" ${hookGames.includes('hsr') ? 'checked' : ''} onchange="handleGameChange(this)"> 
+              <span>HSR</span>
             </label>
-            <label class="checkbox-label text-xs">
-              <input type="checkbox" class="hook-game-genshin" ${hookGames.includes('genshin') ? 'checked' : ''} onchange="handleGameChange(this)"> Genshin
+            
+            <label class="checkbox-label flex items-center gap-2 cursor-pointer select-none">
+              <input type="checkbox" class="hook-game-genshin accent-indigo w-5 h-5 mr-2" ${hookGames.includes('genshin') ? 'checked' : ''} onchange="handleGameChange(this)"> 
+              <span>Genshin</span>
             </label>
-            <label class="checkbox-label text-xs">
-              <input type="checkbox" class="hook-game-wuwa" ${hookGames.includes('wuwa') ? 'checked' : ''} onchange="handleGameChange(this)"> WuWa
+            
+            <label class="checkbox-label flex items-center gap-2 cursor-pointer select-none">
+              <input type="checkbox" class="hook-game-wuwa accent-indigo w-5 h-5 mr-2" ${hookGames.includes('wuwa') ? 'checked' : ''} onchange="handleGameChange(this)"> 
+              <span>WuWa</span>
             </label>
-            <label class="checkbox-label text-xs">
-              <input type="checkbox" class="hook-game-endfield" ${hookGames.includes('endfield') ? 'checked' : ''} onchange="handleGameChange(this)"> Endfield
+            
+            <label class="checkbox-label flex items-center gap-2 cursor-pointer select-none">
+              <input type="checkbox" class="hook-game-endfield accent-indigo w-5 h-5 mr-2" ${hookGames.includes('endfield') ? 'checked' : ''} onchange="handleGameChange(this)"> 
+              <span>Endfield</span>
             </label>
-            <label class="checkbox-label text-xs">
-              <input type="checkbox" class="hook-game-nte" ${hookGames.includes('nte') ? 'checked' : ''} onchange="handleGameChange(this)"> NTE
+            
+            <label class="checkbox-label flex items-center gap-2 cursor-pointer select-none">
+              <input type="checkbox" class="hook-game-nte accent-indigo w-5 h-5 mr-2" ${hookGames.includes('nte') ? 'checked' : ''} onchange="handleGameChange(this)"> 
+              <span>NTE</span>
             </label>
           </div>
         </div>
