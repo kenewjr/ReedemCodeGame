@@ -633,7 +633,7 @@ const server = http.createServer(async (req, res) => {
 // Initialize Database & Start Server (Only when not running in unit test mode)
 if (!process.env.TEST_DB_PATH) {
   initDb().then(() => {
-    server.listen(PORT, () => {
+    server.listen(PORT, "0.0.0.0", () => {
       console.log(`🚀 RedeemRelay Server running on http://localhost:${PORT}`);
       addLog("INFO", "SERVER_START", `RedeemRelay server started on port ${PORT}`);
 

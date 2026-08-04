@@ -7,7 +7,6 @@ services:
       - "3000:3000"
     environment:
       - PORT=3000
-      - ADMIN_TOKEN=change_me_super_secret_token
       - POLL_SECONDS=60
       - DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/your/webhook/url
       - CAMOFOX_URL=http://camofox:9377
