@@ -1096,9 +1096,22 @@ function initMobileSidebar() {
 }
 
 // Initial Run
-initTabNavigation();
-initMobileSidebar();
-loadVersion();
-loadDashboardData();
-
+document.addEventListener('DOMContentLoaded', () => {
+  console.log('Dashboard initialized with event handlers');
+  initTabNavigation();
+  initMobileSidebar();
+  loadVersion();
+  loadDashboardData();
+  
+  // Ensure checkbox event handlers are attached
+  setTimeout(() => {
+    const checkboxes = document.querySelectorAll('[class*="hook-game-"]');
+    checkboxes.forEach(cb => {
+      if (!cb.hasAttribute('onchange')) {
+        cb.setAttribute('onchange', cb.classList.contains('hook-all-games') ? 'handleAllGamesChange(this)' : 'handleGameChange(this)');
+      }
+    });
+    console.log('Event handlers verified:', checkboxes.length);
+  }, 500);
+});
 
