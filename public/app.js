@@ -97,6 +97,14 @@ document.querySelectorAll(".nav-item[data-tab]").forEach(btn => {
     const target = btn.getAttribute("data-tab");
     document.getElementById(target)?.classList.add("active");
 
+    const tabNames = {
+      "overviewTab": "Dashboard Feed",
+      "sourcesTab": "Source Health",
+      "logsTab": "System Logs",
+      "configTab": "Multi-Webhook Relay"
+    };
+    showToast("info", "Tab Changed", `Switched to ${tabNames[target] || target}`, 1500);
+
     if (target === "logsTab") loadSystemLogs();
   });
 });
@@ -108,6 +116,7 @@ document.querySelectorAll("#gameFilter .pill").forEach(pill => {
     pill.classList.add("active");
     currentGameFilter = pill.getAttribute("data-game");
     currentPage = 1;
+    showToast("info", "Filter Applied", `Filtering by game: ${currentGameFilter === "all" ? "All Games" : currentGameFilter.toUpperCase()}...`, 2000);
     loadCodesFeed();
   });
 });
@@ -118,6 +127,7 @@ document.querySelectorAll("#statusFilter .pill").forEach(pill => {
     pill.classList.add("active");
     currentStatusFilter = pill.getAttribute("data-status");
     currentPage = 1;
+    showToast("info", "Filter Applied", `Filtering by status: ${currentStatusFilter === "all" ? "All Status" : currentStatusFilter}...`, 2000);
     loadCodesFeed();
   });
 });
@@ -234,6 +244,7 @@ function updatePaginationUI() {
 document.getElementById("btnPrevPage")?.addEventListener("click", () => {
   if (currentPage > 1) {
     currentPage--;
+    showToast("info", "Loading", `Loading page ${currentPage}...`, 1500);
     loadCodesFeed();
   }
 });
@@ -242,6 +253,7 @@ document.getElementById("btnNextPage")?.addEventListener("click", () => {
   const totalPages = Math.ceil(totalCodesCount / pageSize) || 1;
   if (currentPage < totalPages) {
     currentPage++;
+    showToast("info", "Loading", `Loading page ${currentPage}...`, 1500);
     loadCodesFeed();
   }
 });
@@ -930,8 +942,14 @@ document.getElementById("runNowBtn")?.addEventListener("click", async () => {
 });
 
 // Refresh Handlers
-document.getElementById("btnRefreshSources")?.addEventListener("click", loadDashboardData);
-document.getElementById("btnRefreshLogs")?.addEventListener("click", loadSystemLogs);
+document.getElementById("btnRefreshSources")?.addEventListener("click", () => {
+  showToast("info", "Refreshing", "Refreshing dashboard data...", 1500);
+  loadDashboardData();
+});
+document.getElementById("btnRefreshLogs")?.addEventListener("click", () => {
+  showToast("info", "Refreshing", "Refreshing system logs...", 1500);
+  loadSystemLogs();
+});
 document.getElementById("logLevelFilter")?.addEventListener("change", renderLogsTable);
 
 // Modal Controls
@@ -942,6 +960,7 @@ document.getElementById("btnOpenDocs")?.addEventListener("click", () => {
   docsModal?.classList.remove("hidden");
   const contentEl = document.getElementById("docsContent");
   if (contentEl) contentEl.innerText = EMBEDDED_DOCS_MD;
+  showToast("info", "Documentation", "API Documentation opened", 1500);
 });
 
 document.getElementById("btnCloseDocs")?.addEventListener("click", () => docsModal?.classList.add("hidden"));
