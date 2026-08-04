@@ -13,7 +13,22 @@ services:
     volumes:
       - ./data:/app/data
     depends_on:
-      - camofox
+      camofox:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3000/api/version"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
+        reservations:
+          cpus: '0.5'
+          memory: 256M
 
   camofox:
     image: ghcr.io/jo-inc/camofox-browser:latest
@@ -21,4 +36,18 @@ services:
     restart: always
     ports:
       - "9377:9377"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:9377"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
 

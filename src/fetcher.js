@@ -47,7 +47,7 @@ async function fetchViaCamofox(targetUrl, camofoxUrl) {
   const urlWithQuery = `${endpoint}?url=${encodeURIComponent(targetUrl)}`;
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 4000); // 4s fast timeout for Camofox
+  const timeout = setTimeout(() => controller.abort(), 2000); // 2s fast timeout for Camofox
 
   try {
     const res = await fetch(urlWithQuery, {

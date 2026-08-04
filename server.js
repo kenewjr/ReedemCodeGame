@@ -145,8 +145,8 @@ async function runPoll() {
           let parsed = [];
 
           try {
-            // Jitter delay between native source requests (300ms - 800ms)
-            const jitter = Math.floor(Math.random() * 500) + 300;
+            // Jitter delay between native source requests (50ms - 150ms)
+            const jitter = Math.floor(Math.random() * 100) + 50;
             await new Promise(r => setTimeout(r, jitter));
 
             const res = await fetchWithBypass(src.url, { timeoutMs: 10000 });
