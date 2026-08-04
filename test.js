@@ -357,6 +357,25 @@ test("System Logging - AUTO_PUBLISH_FAILED Audit Logging on Crosspost Error", as
   assert.ok(failedLog.message.includes(errorMsg));
 });
 
+test("HTTP Server - Compression & Cache-Control Headers", async () => {
+  const { server } = await import("./server.js");
+  const port = 3999;
+  await new Promise((resolve) => server.listen(port, "127.0.0.1", resolve));
+
+  try {
+    // 1. Test Brotli compression on static file (> 256B)
+    const resBr = await fetch(`http://127.0.0.1:${port}/style.css`, {
+      headers: { "Accept-Encoding": "br" }
+    });
+    assert.equal(resBr.status, 200);
+    assert.equal(resBr.headers.get("content-encoding"), "br");
+    assert.equal(resBr.headers.get("cache-control"), "public, max-age=3600");
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+
 
 
 

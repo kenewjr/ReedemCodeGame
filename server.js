@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import zlib from "node:zlib";
 import crypto from "node:crypto";
+import os from "node:os";
 import { loadConfig, saveConfig } from "./src/state.js";
 import { SOURCES } from "./src/sources.js";
 import { GAME_REGISTRY } from "./src/games/registry.js";
@@ -310,6 +311,58 @@ async function runPoll() {
   }
 }
 
+// Helper: Get non-internal IPv4 LAN addresses
+function getLanAddresses() {
+  const interfaces = os.networkInterfaces();
+  const addresses = [];
+  for (const name of Object.keys(interfaces)) {
+    for (const iface of interfaces[name] || []) {
+      if (iface.family === "IPv4" && !iface.internal) {
+        addresses.push(iface.address);
+      }
+    }
+  }
+  return addresses;
+}
+
+// Helper: HTTP Response with Brotli/gzip compression
+function respondWithCompression(req, res, statusCode, headers, bodyBufferOrString) {
+  const buf = Buffer.isBuffer(bodyBufferOrString)
+    ? bodyBufferOrString
+    : Buffer.from(bodyBufferOrString);
+
+  const acceptEncoding = req.headers["accept-encoding"] || "";
+
+  if (buf.length > 256) {
+    if (acceptEncoding.includes("br")) {
+      const compressed = zlib.brotliCompressSync(buf);
+      res.writeHead(statusCode, {
+        ...headers,
+        "Content-Encoding": "br",
+        "Content-Length": compressed.length,
+        "Vary": "Accept-Encoding"
+      });
+      return res.end(compressed);
+    }
+    if (acceptEncoding.includes("gzip")) {
+      const compressed = zlib.gzipSync(buf);
+      res.writeHead(statusCode, {
+        ...headers,
+        "Content-Encoding": "gzip",
+        "Content-Length": compressed.length,
+        "Vary": "Accept-Encoding"
+      });
+      return res.end(compressed);
+    }
+  }
+
+  res.writeHead(statusCode, {
+    ...headers,
+    "Content-Length": buf.length
+  });
+  return res.end(buf);
+}
+
 // Start HTTP Server
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
@@ -317,13 +370,14 @@ const server = http.createServer(async (req, res) => {
   const clientIp = req.headers["x-forwarded-for"] || req.socket.remoteAddress || "127.0.0.1";
 
   const sendJson = (statusCode, data) => {
-    res.writeHead(statusCode, {
-      "Content-Type": "application/json",
+    const jsonStr = JSON.stringify(data);
+    const headers = {
+      "Content-Type": "application/json; charset=utf-8",
       "Access-Control-Allow-Origin": "*",
       "Access-Control-Allow-Headers": "Content-Type, Authorization",
       "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS"
-    });
-    res.end(JSON.stringify(data));
+    };
+    return respondWithCompression(req, res, statusCode, headers, jsonStr);
   };
 
   if (req.method === "OPTIONS") {
@@ -338,7 +392,7 @@ const server = http.createServer(async (req, res) => {
     });
   });
 
-  // Serve static UI & Docs (with gzip + cache headers)
+  // Serve static UI & Docs (with gzip/brotli + cache headers)
   if (req.method === "GET" && !url.pathname.startsWith("/api")) {
     let filePath = "";
     if (url.pathname.startsWith("/docs/")) {
@@ -348,7 +402,9 @@ const server = http.createServer(async (req, res) => {
     }
 
     try {
-      if (!fs.existsSync(filePath)) {
+      try {
+        await fs.promises.access(filePath);
+      } catch {
         filePath = path.join("public", "index.html");
       }
       const ext = path.extname(filePath);
@@ -357,27 +413,21 @@ const server = http.createServer(async (req, res) => {
         ".css": "text/css; charset=utf-8",
         ".js": "application/javascript; charset=utf-8",
         ".md": "text/markdown; charset=utf-8",
-        ".json": "application/json"
+        ".json": "application/json; charset=utf-8",
+        ".png": "image/png",
+        ".jpg": "image/jpeg",
+        ".svg": "image/svg+xml",
+        ".ico": "image/x-icon"
       };
       const content = await fs.promises.readFile(filePath);
       const contentType = mimeTypes[ext] || "text/plain";
       // Cache static assets (CSS/JS) for 1h, HTML for 0 (always revalidate)
       const cacheControl = ext === ".html" ? "no-cache" : "public, max-age=3600";
-      const acceptEncoding = req.headers["accept-encoding"] || "";
 
-      if (acceptEncoding.includes("gzip") && [".html", ".css", ".js", ".json", ".md"].includes(ext)) {
-        const compressed = zlib.gzipSync(content);
-        res.writeHead(200, {
-          "Content-Type": contentType,
-          "Content-Encoding": "gzip",
-          "Cache-Control": cacheControl,
-          "Vary": "Accept-Encoding"
-        });
-        return res.end(compressed);
-      }
-
-      res.writeHead(200, { "Content-Type": contentType, "Cache-Control": cacheControl });
-      return res.end(content);
+      return respondWithCompression(req, res, 200, {
+        "Content-Type": contentType,
+        "Cache-Control": cacheControl
+      }, content);
     } catch {
       res.writeHead(404, { "Content-Type": "text/plain" });
       return res.end("Not Found");
@@ -654,15 +704,23 @@ const server = http.createServer(async (req, res) => {
 if (!process.env.TEST_DB_PATH) {
   initDb().then(() => {
     server.listen(PORT, "0.0.0.0", () => {
-      console.log(`🚀 RedeemRelay Server running on http://localhost:${PORT}`);
-      addLog("INFO", "SERVER_START", `RedeemRelay server started on port ${PORT}`);
+      const lanAddrs = getLanAddresses();
+      const lanStr = lanAddrs.length > 0 ? lanAddrs.map(ip => `http://${ip}:${PORT}`).join(", ") : `http://0.0.0.0:${PORT}`;
+      console.log(`🚀 RedeemRelay Server running on:`);
+      console.log(`   - Local:   http://localhost:${PORT}`);
+      if (lanAddrs.length > 0) {
+        lanAddrs.forEach(ip => console.log(`   - Network: http://${ip}:${PORT}`));
+      } else {
+        console.log(`   - Network: http://0.0.0.0:${PORT}`);
+      }
+      addLog("INFO", "SERVER_START", `RedeemRelay server started on port ${PORT} (LAN: ${lanStr})`);
 
       // Set background poll interval
       setInterval(() => {
         runPoll();
       }, (loadConfig().pollSeconds || 60) * 1000);
 
-      // Run initial poll after 1.5s
+      // Run initial poll after 5s
       // ponytail: 5s delay lets camofox fully ready in Docker; lower if running standalone
       setTimeout(runPoll, 5000);
     });

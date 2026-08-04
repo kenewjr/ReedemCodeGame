@@ -247,7 +247,7 @@ document.getElementById("btnNextPage")?.addEventListener("click", () => {
 });
 
 // Fetch Codes Feed per game independently
-async function loadCodesFeed() {
+async function loadCodesFeed(skipProgressStop = false) {
   setProgressBar("start");
   try {
     const gameParam = currentGameFilter === "all" ? "" : `&game=${currentGameFilter}`;
@@ -264,7 +264,7 @@ async function loadCodesFeed() {
   } catch (err) {
     console.error("Codes feed fetch error:", err);
   } finally {
-    setProgressBar("stop");
+    if (!skipProgressStop) setProgressBar("stop");
   }
 }
 
@@ -743,7 +743,7 @@ async function loadDashboardData() {
       loadCodeCounts(),
 
       // 4. Codes Feed
-      loadCodesFeed(),
+      loadCodesFeed(true),
 
       // 5. Logs
       loadSystemLogs()
