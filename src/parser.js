@@ -178,8 +178,20 @@ export function parseFandomWikitext(game, wikitext, sourceUrl) {
 
             let server = parts[1]?.trim() || "G";
             let rewards = (parts[2] || "").replace(/\{\{Item List\|([^}]+)\}\}/g, "$1").replace(/\|/g, ", ").trim();
-            let discovered = (parts[3] || "").trim();
-            let expires = (parts[4] || "").replace(/\}\}\s*$/, "").trim();
+            
+            let val3 = (parts[3] || "").trim();
+            let val4 = (parts[4] || "").replace(/\}\}\s*$/, "").trim();
+
+            let discovered = "";
+            let expires = "";
+
+            if (val3.match(/PT|UTC|\d{1,2}:\d{2}|valid|version|patch|exp|indef/i) || !val4) {
+              expires = val3;
+              discovered = val4;
+            } else {
+              discovered = val3;
+              expires = val4;
+            }
 
             if (rewards.includes("{{") || rewards.includes("}}") || expires.includes("{{") || expires.includes("}}")) {
               continue;

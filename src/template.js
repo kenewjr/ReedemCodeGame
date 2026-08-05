@@ -13,6 +13,8 @@ export function formatRewards(rawRewards) {
     .map(line => {
       let trimmed = line.replace(/^[\s・•\-*]+/, "").replace(/[\s・•\-*]+$/, "").trim();
       trimmed = trimmed.replace(/\s+/g, " ");
+      // Convert quantity multiplier asterisk (*100 ->  ×100) to avoid Discord markdown italic formatting
+      trimmed = trimmed.replace(/\*(\d+)/g, " ×$1");
       return trimmed;
     })
     .filter(Boolean);

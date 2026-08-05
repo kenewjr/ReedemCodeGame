@@ -199,6 +199,9 @@ export async function initDb() {
     await db.execute(`CREATE INDEX IF NOT EXISTS idx_codes_first_seen ON codes(first_seen_at DESC)`);
     await db.execute(`CREATE INDEX IF NOT EXISTS idx_system_logs_ts ON system_logs(timestamp DESC, level)`);
     await db.execute(`CREATE INDEX IF NOT EXISTS idx_deliveries_sent ON deliveries(sent_at DESC)`);
+
+    // Migration & Cleanup for misplaced discovered_at strings containing expiry timezones/text
+    await db.execute(`UPDATE codes SET expires_at = discovered_at, discovered_at = '' WHERE discovered_at LIKE '%(PT)%' OR discovered_at LIKE '%UTC%' OR discovered_at LIKE '%Valid%'`);
   } catch {}
 }
 
