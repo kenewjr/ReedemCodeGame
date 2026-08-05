@@ -81,6 +81,18 @@ function isValidChannelId(channelId) {
   return /^\d{17,20}$/.test(str);
 }
 
+let pollSchedulerTimer = null;
+export function resetPollScheduler(seconds) {
+  if (pollSchedulerTimer) {
+    clearInterval(pollSchedulerTimer);
+    pollSchedulerTimer = null;
+  }
+  const sec = Math.max(15, Math.min(3600, Number(seconds) || 60));
+  pollSchedulerTimer = setInterval(() => {
+    runPoll();
+  }, sec * 1000);
+}
+
 let totalPollCount = 0;
 
 // Core Polling Engine
@@ -215,7 +227,9 @@ async function runPoll() {
       pollProgress.updatedAt = new Date().toISOString();
       pollProgress.message = `Processing ${gameCandidates.length} candidate codes for ${gameId}...`;
 
-      // Save Candidates to DB & Notify Webhooks
+      const pendingDeliveries = [];
+
+      // Save Candidates to DB
       for (const cand of gameCandidates) {
         const { record, eventType } = await saveCodeCandidate(cand);
         pollProgress.savedCount++;
@@ -226,55 +240,69 @@ async function runPoll() {
           await addLog("INFO", "NEW_CODE_FOUND", `Discovered new code ${record.code} for ${record.game}`, record);
         }
 
-        // Notify Discord Webhooks on new or expired code events
         if (eventType) {
-          pollProgress.phase = "delivering";
-          pollProgress.updatedAt = new Date().toISOString();
-          for (const hook of config.webhooks || []) {
-            if (!hook.enabled || !hook.url) continue;
+          pendingDeliveries.push({ record, eventType });
+        }
+      }
 
-            // Multi-Webhook Game Scoping Filter (Point 12)
-            const hookGames = Array.isArray(hook.games) ? hook.games : [];
+      // Dispatch Webhooks per Webhook with Tag Batching (Tag ONLY on last code of batch per webhook)
+      if (pendingDeliveries.length > 0) {
+        pollProgress.phase = "delivering";
+        pollProgress.updatedAt = new Date().toISOString();
+
+        for (const hook of config.webhooks || []) {
+          if (!hook.enabled || !hook.url) continue;
+
+          const hookGames = Array.isArray(hook.games) ? hook.games : [];
+          const eligibleDeliveries = [];
+
+          for (const item of pendingDeliveries) {
+            const { record, eventType } = item;
             const isGameAllowed = hook.allGames !== false || hookGames.length === 0 || hookGames.includes(record.game);
             if (!isGameAllowed) continue;
 
             const alreadyDelivered = await hasDelivered(record.game, record.code, hook.id, eventType);
             if (!alreadyDelivered) {
-              const tags = formatTags(hook.rolesToTag, hook.usersToTag);
-              
-              // If hook has custom text template, use text; else use Discord Embed
-              let payloadObj;
-              if (hook.customMessage && hook.customMessage.trim()) {
-                payloadObj = { content: renderMessage(hook.customMessage, record, tags) };
-              } else {
-                payloadObj = renderDiscordEmbed(record, tags);
-              }
+              eligibleDeliveries.push(item);
+            }
+          }
 
-              const delivery = await sendDiscordWebhook(hook.url, payloadObj, {
-                username: hook.username,
-                avatarUrl: hook.avatarUrl
-              });
+          const totalHookItems = eligibleDeliveries.length;
+          for (let i = 0; i < totalHookItems; i++) {
+            const { record, eventType } = eligibleDeliveries[i];
+            const isLastItem = (i === totalHookItems - 1);
+            const tags = isLastItem ? formatTags(hook.rolesToTag, hook.usersToTag) : "";
 
-              if (delivery.ok) {
-                summary.sentDeliveries++;
-                pollProgress.deliveriesSent++;
-                await recordDelivery(record.game, record.code, hook.id, eventType, delivery.messageId, "");
-                await addLog("INFO", "WEBHOOK_SENT", `Delivered ${record.code} to webhook ${hook.name}`, { webhookId: hook.id });
+            let payloadObj;
+            if (hook.customMessage && hook.customMessage.trim()) {
+              payloadObj = { content: renderMessage(hook.customMessage, record, tags) };
+            } else {
+              payloadObj = renderDiscordEmbed(record, tags);
+            }
 
-                // Discord Auto-Publish Crossposting
-                if (hook.autoPublish && config.discordBotToken && hook.channelId && delivery.messageId) {
-                  const pubRes = await publishDiscordMessage(hook.channelId, delivery.messageId, config.discordBotToken);
-                  if (pubRes.ok) {
-                    await addLog("INFO", "AUTO_PUBLISH", `Crossposted message ${delivery.messageId} to channel ${hook.channelId}`);
-                  } else {
-                    await addLog("WARN", "AUTO_PUBLISH_FAILED", `Failed to crosspost message ${delivery.messageId}: ${pubRes.error}`);
-                  }
+            const delivery = await sendDiscordWebhook(hook.url, payloadObj, {
+              username: hook.username,
+              avatarUrl: hook.avatarUrl
+            });
+
+            if (delivery.ok) {
+              summary.sentDeliveries++;
+              pollProgress.deliveriesSent++;
+              await recordDelivery(record.game, record.code, hook.id, eventType, delivery.messageId, "");
+              await addLog("INFO", "WEBHOOK_SENT", `Delivered ${record.code} to webhook ${hook.name}`, { webhookId: hook.id });
+
+              if (hook.autoPublish && config.discordBotToken && hook.channelId && delivery.messageId) {
+                const pubRes = await publishDiscordMessage(hook.channelId, delivery.messageId, config.discordBotToken);
+                if (pubRes.ok) {
+                  await addLog("INFO", "AUTO_PUBLISH", `Crossposted message ${delivery.messageId} to channel ${hook.channelId}`);
+                } else {
+                  await addLog("WARN", "AUTO_PUBLISH_FAILED", `Failed to crosspost message ${delivery.messageId}: ${pubRes.error}`);
                 }
-              } else {
-                await recordDelivery(record.game, record.code, hook.id, eventType, "", delivery.error);
-                summary.errors.push(`Webhook ${hook.name} failed for ${record.code}: ${delivery.error}`);
-                await addLog("ERROR", "WEBHOOK_FAILED", `Failed to send ${record.code} to webhook ${hook.name}: ${delivery.error}`);
               }
+            } else {
+              await recordDelivery(record.game, record.code, hook.id, eventType, "", delivery.error);
+              summary.errors.push(`Webhook ${hook.name} failed for ${record.code}: ${delivery.error}`);
+              await addLog("ERROR", "WEBHOOK_FAILED", `Failed to send ${record.code} to webhook ${hook.name}: ${delivery.error}`);
             }
           }
         }
@@ -567,7 +595,7 @@ function clearApiCache() {
   if (url.pathname.startsWith("/api/config") || ["/api/run-now", "/api/test-webhook", "/api/force-send"].includes(url.pathname)) {
 
     if (req.method === "GET" && url.pathname === "/api/config") {
-      return sendJson(200, { ok: true, config });
+      return sendJson(200, { ok: true, config: loadConfig() });
     }
 
     if (req.method === "PUT" && url.pathname === "/api/config") {
@@ -579,9 +607,13 @@ function clearApiCache() {
           }
         }
       }
-      saveConfig({ ...loadConfig(), ...body });
-      addLog("INFO", "CONFIG_UPDATE", "Configuration updated via Admin Dashboard API").catch(() => {});
-      return sendJson(200, { ok: true, message: "Configuration saved successfully" });
+      const updatedCfg = { ...loadConfig(), ...body };
+      saveConfig(updatedCfg);
+      if (body.pollSeconds) {
+        resetPollScheduler(body.pollSeconds);
+      }
+      addLog("INFO", "CONFIG_UPDATE", "Configuration updated via Admin Dashboard API", { pollSeconds: updatedCfg.pollSeconds }).catch(() => {});
+      return sendJson(200, { ok: true, message: "Configuration saved successfully", config: updatedCfg });
     }
 
     // Granular Webhook APIs
@@ -683,8 +715,17 @@ function clearApiCache() {
       const errors = [];
       const rateLimitedHooks = new Set();
 
-      for (const record of validRecords) {
-        for (const hook of targetHooks) {
+      for (const hook of targetHooks) {
+        const hookGames = Array.isArray(hook.games) ? hook.games : [];
+        const eligibleRecords = validRecords.filter(r => {
+          return hook.allGames !== false || hookGames.length === 0 || hookGames.includes(r.game);
+        });
+
+        const totalHookItems = eligibleRecords.length;
+
+        for (let i = 0; i < totalHookItems; i++) {
+          const record = eligibleRecords[i];
+
           if (rateLimitedHooks.has(hook.id)) {
             failedCount++;
             errors.push(`${record.code} -> ${hook.name}: Skipped due to active HTTP 429 rate limit penalty.`);
@@ -694,7 +735,9 @@ function clearApiCache() {
           // Rate Limit Protection Delay: ~850ms jitter between sends to same webhook
           await new Promise(r => setTimeout(r, 850));
 
-          const tags = formatTags(hook.rolesToTag, hook.usersToTag);
+          const isLastItem = (i === totalHookItems - 1);
+          const tags = isLastItem ? formatTags(hook.rolesToTag, hook.usersToTag) : "";
+
           let payloadObj;
           if (hook.customMessage && hook.customMessage.trim()) {
             payloadObj = { content: renderMessage(hook.customMessage, record, tags) };
@@ -759,10 +802,8 @@ if (!process.env.TEST_DB_PATH) {
       }
       addLog("INFO", "SERVER_START", `RedeemRelay server started on port ${PORT} (LAN: ${lanStr})`);
 
-      // Set background poll interval
-      setInterval(() => {
-        runPoll();
-      }, (loadConfig().pollSeconds || 60) * 1000);
+      // Set dynamic background poll interval scheduler
+      resetPollScheduler(loadConfig().pollSeconds || 60);
 
       // Run initial poll after 5s
       // ponytail: 5s delay lets camofox fully ready in Docker; lower if running standalone

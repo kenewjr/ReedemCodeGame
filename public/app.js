@@ -173,7 +173,7 @@ function renderCodesTable() {
   document.getElementById("codesCountPill").innerText = `${totalCodesCount} items`;
 
   if (filtered.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="10" class="text-center py-4 text-muted">No redeem codes match your current filter.</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="11" class="text-center py-4 text-muted">No redeem codes match your current filter.</td></tr>`;
     return;
   }
 
@@ -184,6 +184,9 @@ function renderCodesTable() {
     const typeClass = codeType === "anniversary" ? "badge-anniversary" : (codeType === "livestream" ? "badge-livestream" : (codeType === "patch" ? "badge-patch" : "badge-redeem"));
     const verifiedCount = Number(c.verified_count || 1);
     const redeemLink = getRedeemUrl(c.game, c.code);
+
+    const firstSeenDate = c.discovered_at || (c.first_seen_at ? c.first_seen_at.split("T")[0] : "-");
+    const firstSeenTitle = c.discovered_at ? `Source Discovered: ${c.discovered_at}` : `System Recorded: ${c.first_seen_at || ''}`;
 
     return `
       <tr>
@@ -201,6 +204,7 @@ function renderCodesTable() {
         <td><span class="badge-verified" title="Confirmed by ${verifiedCount} sources">${verifiedCount} src</span></td>
         <td><span class="text-muted font-mono">${c.server || "All"}</span></td>
         <td><span class="font-medium">${c.rewards || "N/A"}</span></td>
+        <td><span class="text-muted text-xs font-mono" title="${firstSeenTitle}">📅 ${firstSeenDate}</span></td>
         <td><span class="text-muted text-xs">${c.expires_at || "Unknown"}</span></td>
         <td><span class="text-xs text-dim text-truncate" style="max-width:180px; display:inline-block;" title="${c.notes || ''}">${c.notes || '-'}</span></td>
         <td class="text-right">
@@ -818,7 +822,12 @@ async function loadDashboardData() {
         .then(data => {
           if (!data) return;
           const cfg = data.config;
-          document.getElementById("pollSeconds").value = cfg.pollSeconds || 60;
+          const pollSec = cfg.pollSeconds || 60;
+          document.getElementById("pollSeconds").value = pollSec;
+          const lastPollEl = document.getElementById("lastPollTime");
+          if (lastPollEl) {
+            lastPollEl.innerText = `Polling every ${pollSec}s`;
+          }
           document.getElementById("discordBotToken").value = cfg.discordBotToken || "";
           if (document.getElementById("defaultMessageTemplate")) {
             document.getElementById("defaultMessageTemplate").value = cfg.defaultMessageTemplate || "";
@@ -888,7 +897,11 @@ document.getElementById("globalConfigForm")?.addEventListener("submit", async (e
     });
 
     if (res.ok) {
-      showToast("success", "Saved", "Global settings saved successfully!");
+      const lastPollEl = document.getElementById("lastPollTime");
+      if (lastPollEl) {
+        lastPollEl.innerText = `Polling every ${payload.pollSeconds}s`;
+      }
+      showToast("success", "Saved", `Global settings saved! Polling dynamic interval updated to ${payload.pollSeconds}s.`);
     } else {
       showToast("error", "Save Failed", "Failed to save global settings.");
     }

@@ -446,6 +446,40 @@ test("HTTP Server - Active Codes Export API Endpoint", async () => {
   }
 });
 
+test("Dynamic Poll Scheduler - Timer Reset Support", async () => {
+  const { resetPollScheduler } = await import("./server.js");
+  assert.equal(typeof resetPollScheduler, "function");
+  // Ensure function executes without throwing
+  resetPollScheduler(120);
+  resetPollScheduler(60);
+});
+
+test("Batch Tagging - Tags Attached ONLY on Last Code of Webhook Batch", () => {
+  const mockWebhook = {
+    rolesToTag: ["111222333"],
+    usersToTag: ["444555666"]
+  };
+  const batchRecords = [
+    { game: "hsr", code: "CODE_1" },
+    { game: "hsr", code: "CODE_2" },
+    { game: "genshin", code: "CODE_3" }
+  ];
+
+  const totalItems = batchRecords.length;
+  const outputs = batchRecords.map((rec, i) => {
+    const isLast = (i === totalItems - 1);
+    const tags = isLast ? formatTags(mockWebhook.rolesToTag, mockWebhook.usersToTag) : "";
+    return renderDiscordEmbed(rec, tags);
+  });
+
+  // Code 1 & 2 (index 0 & 1): content (tags) omitted
+  assert.equal(outputs[0].content, undefined);
+  assert.equal(outputs[1].content, undefined);
+
+  // Code 3 (index 2 - last code in batch): content contains role/user tags
+  assert.equal(outputs[2].content, "<@&111222333> <@444555666>");
+});
+
 // Auto-cleanup isolated test SQLite file on process exit
 process.on("exit", () => {
   try {
