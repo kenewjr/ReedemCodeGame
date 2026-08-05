@@ -290,6 +290,7 @@ async function runPoll() {
     pollProgress.finishedAt = new Date().toISOString();
     pollProgress.updatedAt = new Date().toISOString();
     pollProgress.message = `Poll completed successfully. ${summary.newCodes} new codes found.`;
+    clearApiCache();
   } catch (err) {
     summary.errors.push(err.message);
     await finishRun(runId, "error", summary.fetchedSources, summary.newCodes, err.message, summary);
@@ -448,6 +449,20 @@ const server = http.createServer(async (req, res) => {
     return sendJson(200, { ok: true, isPolling, progress: pollProgress });
   }
 
+// Simple In-Memory TTL Cache for High-Frequency Public APIs
+const apiCache = new Map();
+function getCachedApi(key) {
+  const item = apiCache.get(key);
+  if (item && (Date.now() - item.ts < 10000)) return item.data;
+  return null;
+}
+function setCachedApi(key, data) {
+  apiCache.set(key, { ts: Date.now(), data });
+}
+function clearApiCache() {
+  apiCache.clear();
+}
+
   if (url.pathname.startsWith("/api/public/")) {
     if (!checkRateLimit(clientIp, 60, 60000)) {
       return sendJson(429, { ok: false, error: "Rate limit exceeded. Try again in a minute." });
@@ -457,20 +472,48 @@ const server = http.createServer(async (req, res) => {
       const game = url.searchParams.get("game");
       const status = url.searchParams.get("status");
       const codeType = url.searchParams.get("code_type");
+      const search = url.searchParams.get("search");
       const limit = parseInt(url.searchParams.get("limit") || "200", 10);
       const offset = parseInt(url.searchParams.get("offset") || "0", 10);
 
-      const result = await getCodeRecords({ game, status, code_type: codeType, limit, offset });
-      return sendJson(200, {
+      const cacheKey = `codes:${game || 'all'}:${status || 'all'}:${codeType || 'all'}:${search || ''}:${limit}:${offset}`;
+      const cached = getCachedApi(cacheKey);
+      if (cached) return sendJson(200, cached);
+
+      const result = await getCodeRecords({ game, status, code_type: codeType, search, limit, offset });
+      const responsePayload = {
         ok: true,
         data: result.rows,
         pagination: { total: result.total, limit: result.limit, offset: result.offset }
+      };
+      setCachedApi(cacheKey, responsePayload);
+      return sendJson(200, responsePayload);
+    }
+
+    if (req.method === "GET" && url.pathname === "/api/public/codes/export") {
+      const game = url.searchParams.get("game");
+      const status = url.searchParams.get("status") || "active";
+      const result = await getCodeRecords({ game: game === "all" ? null : game, status, limit: 500 });
+      const codesList = result.rows.map(r => r.code);
+      const plainText = codesList.join("\n");
+
+      res.writeHead(200, {
+        "Content-Type": "text/plain; charset=utf-8",
+        "Access-Control-Allow-Origin": "*",
+        "Cache-Control": "no-cache"
       });
+      return res.end(plainText);
     }
 
     if (req.method === "GET" && url.pathname === "/api/public/codes/count") {
+      const cacheKey = "counts";
+      const cached = getCachedApi(cacheKey);
+      if (cached) return sendJson(200, cached);
+
       const counts = await getCodeCounts();
-      return sendJson(200, { ok: true, data: counts });
+      const payload = { ok: true, data: counts };
+      setCachedApi(cacheKey, payload);
+      return sendJson(200, payload);
     }
 
     if (req.method === "GET" && url.pathname === "/api/public/sources") {
@@ -515,6 +558,7 @@ const server = http.createServer(async (req, res) => {
     };
 
     const resData = await saveCodeCandidate(cand);
+    clearApiCache();
     await addLog("INFO", "MANUAL_CODE", `Manually added code ${cand.code} for ${cand.game}`);
     return sendJson(200, { ok: true, data: resData });
   }

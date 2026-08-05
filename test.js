@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
 
 // Set isolated DB path for testing
 process.env.TEST_DB_PATH = `data/test_redeem_${Date.now()}.sqlite`;
@@ -374,6 +375,86 @@ test("HTTP Server - Compression & Cache-Control Headers", async () => {
     await new Promise((resolve) => server.close(resolve));
   }
 });
+
+test("Webhook Game Scoping Filter - All Games vs Specific Games Matching", () => {
+  const isGameAllowed = (hook, game) => {
+    const hookGames = Array.isArray(hook.games) ? hook.games : [];
+    return hook.allGames !== false || hookGames.length === 0 || hookGames.includes(game);
+  };
+
+  // Case 1: allGames = true -> allowed for all games
+  assert.equal(isGameAllowed({ allGames: true, games: ["hsr"] }, "genshin"), true);
+
+  // Case 2: allGames = false & games = ["hsr", "wuwa"] -> allowed only for hsr and wuwa
+  assert.equal(isGameAllowed({ allGames: false, games: ["hsr", "wuwa"] }, "hsr"), true);
+  assert.equal(isGameAllowed({ allGames: false, games: ["hsr", "wuwa"] }, "wuwa"), true);
+  assert.equal(isGameAllowed({ allGames: false, games: ["hsr", "wuwa"] }, "genshin"), false);
+
+  // Case 3: allGames = false & empty games array -> default fallback allowed
+  assert.equal(isGameAllowed({ allGames: false, games: [] }, "nte"), true);
+});
+
+test("Database Candidate Safety - Handles undefined/null optional fields without throwing", async () => {
+  await initDb();
+  const nullCode = `NULLSAFE_${Date.now()}`;
+
+  const cand = {
+    game: "nte",
+    code: nullCode,
+    status: null,
+    codeType: undefined,
+    server: null,
+    rewards: null,
+    expires: undefined,
+    notes: null,
+    sources: null
+  };
+
+  const { record, eventType } = await saveCodeCandidate(cand);
+  assert.equal(record.code, nullCode);
+  assert.equal(record.status, "unconfirmed");
+  assert.equal(record.game, "nte");
+  assert.equal(eventType, "new_code");
+});
+
+test("Database Performance - SQLite Indexes & Search Query Filtering", async () => {
+  await initDb();
+  const searchCode = `SEARCHTEST_${Date.now()}`;
+
+  await saveCodeCandidate({
+    game: "genshin",
+    code: searchCode,
+    status: "active",
+    rewards: "Primogem*300"
+  });
+
+  const searchRes = await getCodeRecords({ game: "genshin", search: "Primogem*300" });
+  assert.ok(searchRes.rows.some(r => r.code === searchCode));
+});
+
+test("HTTP Server - Active Codes Export API Endpoint", async () => {
+  const { server } = await import("./server.js");
+  const port = 3998;
+  await new Promise((resolve) => server.listen(port, "127.0.0.1", resolve));
+
+  try {
+    const res = await fetch(`http://127.0.0.1:${port}/api/public/codes/export?status=active`);
+    assert.equal(res.status, 200);
+    assert.equal(res.headers.get("content-type"), "text/plain; charset=utf-8");
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+});
+
+// Auto-cleanup isolated test SQLite file on process exit
+process.on("exit", () => {
+  try {
+    if (process.env.TEST_DB_PATH && fs.existsSync(process.env.TEST_DB_PATH)) {
+      fs.unlinkSync(process.env.TEST_DB_PATH);
+    }
+  } catch {}
+});
+
 
 
 

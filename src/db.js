@@ -23,6 +23,10 @@ export function getDbClient() {
 
 export async function initDb() {
   const db = getDbClient();
+  try {
+    await db.execute("PRAGMA busy_timeout = 5000;");
+    await db.execute("PRAGMA journal_mode = WAL;");
+  } catch {}
 
   await db.execute(`
     CREATE TABLE IF NOT EXISTS codes (
@@ -188,6 +192,14 @@ export async function initDb() {
   if (!runsCols.includes("meta_json")) {
     await db.execute(`ALTER TABLE runs ADD COLUMN meta_json TEXT DEFAULT '{}'`);
   }
+
+  // Create performance indexes
+  try {
+    await db.execute(`CREATE INDEX IF NOT EXISTS idx_codes_game_status ON codes(game, status)`);
+    await db.execute(`CREATE INDEX IF NOT EXISTS idx_codes_first_seen ON codes(first_seen_at DESC)`);
+    await db.execute(`CREATE INDEX IF NOT EXISTS idx_system_logs_ts ON system_logs(timestamp DESC, level)`);
+    await db.execute(`CREATE INDEX IF NOT EXISTS idx_deliveries_sent ON deliveries(sent_at DESC)`);
+  } catch {}
 }
 
 export async function addLog(level, category, message, details = {}) {
@@ -388,7 +400,7 @@ export async function saveCodeCandidate(candidate) {
   return { record: updatedRes.rows[0], eventType };
 }
 
-export async function getCodeRecords({ game, status, code_type, limit = 200, offset = 0 } = {}) {
+export async function getCodeRecords({ game, status, code_type, search, limit = 200, offset = 0 } = {}) {
   const db = getDbClient();
   let query = `SELECT * FROM codes WHERE 1=1`;
   const args = [];
@@ -406,6 +418,12 @@ export async function getCodeRecords({ game, status, code_type, limit = 200, off
   if (code_type) {
     query += ` AND code_type = ?`;
     args.push(code_type);
+  }
+
+  if (search && search.trim()) {
+    const term = `%${search.trim().toLowerCase()}%`;
+    query += ` AND (LOWER(code) LIKE ? OR LOWER(rewards) LIKE ? OR LOWER(notes) LIKE ?)`;
+    args.push(term, term, term);
   }
 
   query += ` ORDER BY CASE WHEN status = 'active' THEN 1 WHEN status = 'unconfirmed' THEN 2 ELSE 3 END, last_seen_at DESC LIMIT ? OFFSET ?`;
@@ -428,6 +446,11 @@ export async function getCodeRecords({ game, status, code_type, limit = 200, off
   if (code_type) {
     countQuery += ` AND code_type = ?`;
     countArgs.push(code_type);
+  }
+  if (search && search.trim()) {
+    const term = `%${search.trim().toLowerCase()}%`;
+    countQuery += ` AND (LOWER(code) LIKE ? OR LOWER(rewards) LIKE ? OR LOWER(notes) LIKE ?)`;
+    countArgs.push(term, term, term);
   }
 
   const countRes = await db.execute({ sql: countQuery, args: countArgs });

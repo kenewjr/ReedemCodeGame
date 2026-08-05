@@ -87,27 +87,7 @@ function setProgressBar(state) {
 
 
 
-// Tab Navigation
-document.querySelectorAll(".nav-item[data-tab]").forEach(btn => {
-  btn.addEventListener("click", () => {
-    document.querySelectorAll(".nav-item").forEach(b => b.classList.remove("active"));
-    document.querySelectorAll(".tab-pane").forEach(p => p.classList.remove("active"));
 
-    btn.classList.add("active");
-    const target = btn.getAttribute("data-tab");
-    document.getElementById(target)?.classList.add("active");
-
-    const tabNames = {
-      "overviewTab": "Dashboard Feed",
-      "sourcesTab": "Source Health",
-      "logsTab": "System Logs",
-      "configTab": "Multi-Webhook Relay"
-    };
-    showToast("info", "Tab Changed", `Switched to ${tabNames[target] || target}`, 1500);
-
-    if (target === "logsTab") loadSystemLogs();
-  });
-});
 
 // Filter Pills
 document.querySelectorAll("#gameFilter .pill").forEach(pill => {
@@ -132,14 +112,15 @@ document.querySelectorAll("#statusFilter .pill").forEach(pill => {
   });
 });
 
-// Debounced Search Input
+// Debounced Search Input (Server-side search integration)
 let searchDebounceTimer = null;
 document.getElementById("searchInput")?.addEventListener("input", (e) => {
   clearTimeout(searchDebounceTimer);
   searchDebounceTimer = setTimeout(() => {
     searchQuery = e.target.value.toLowerCase().trim();
-    renderCodesTable();
-  }, 250);
+    currentPage = 1;
+    loadCodesFeed();
+  }, 300);
 });
 
 // Clipboard Helper
@@ -264,9 +245,10 @@ async function loadCodesFeed(skipProgressStop = false) {
   try {
     const gameParam = currentGameFilter === "all" ? "" : `&game=${currentGameFilter}`;
     const statusParam = currentStatusFilter === "all" ? "" : `&status=${currentStatusFilter}`;
+    const searchParam = searchQuery ? `&search=${encodeURIComponent(searchQuery)}` : "";
     const offset = (currentPage - 1) * pageSize;
 
-    const res = await fetch(`/api/public/codes?limit=${pageSize}&offset=${offset}${gameParam}${statusParam}`);
+    const res = await fetch(`/api/public/codes?limit=${pageSize}&offset=${offset}${gameParam}${statusParam}${searchParam}`);
     if (res.ok) {
       const data = await res.json();
       cachedCodes = data.data || [];
@@ -277,6 +259,28 @@ async function loadCodesFeed(skipProgressStop = false) {
     console.error("Codes feed fetch error:", err);
   } finally {
     if (!skipProgressStop) setProgressBar("stop");
+  }
+}
+
+// Copy All Active Codes Utility
+async function copyAllActiveCodes() {
+  const game = currentGameFilter === "all" ? "" : currentGameFilter;
+  try {
+    const res = await fetch(`/api/public/codes/export?game=${game}&status=active`);
+    if (res.ok) {
+      const text = await res.text();
+      if (!text.trim()) {
+        showToast("warning", "No Active Codes", "No active codes found in current view.");
+        return;
+      }
+      navigator.clipboard.writeText(text.trim()).then(() => {
+        const count = text.trim().split("\n").length;
+        const gameLabel = game ? game.toUpperCase() : "All Games";
+        showToast("success", "Copied All Active!", `Copied <strong>${count} active codes</strong> (${gameLabel}) to clipboard!`);
+      });
+    }
+  } catch (err) {
+    showToast("error", "Export Failed", err.message);
   }
 }
 
@@ -468,28 +472,28 @@ function renderWebhooksList() {
               <span>All Games</span>
             </label>
             
-            <label class="checkbox-label flex items-center gap-2 cursor-pointer select-none">
-              <input type="checkbox" class="hook-game-hsr accent-indigo w-5 h-5 mr-2" ${hookGames.includes('hsr') ? 'checked' : ''} onchange="handleGameChange(this)"> 
+            <label class="checkbox-label flex items-center gap-2 cursor-pointer select-none" style="${allGamesChecked ? 'opacity:0.5;' : ''}">
+              <input type="checkbox" class="hook-game-hsr accent-indigo w-5 h-5 mr-2" ${hookGames.includes('hsr') ? 'checked' : ''} ${allGamesChecked ? 'disabled' : ''} onchange="handleGameChange(this)"> 
               <span>HSR</span>
             </label>
             
-            <label class="checkbox-label flex items-center gap-2 cursor-pointer select-none">
-              <input type="checkbox" class="hook-game-genshin accent-indigo w-5 h-5 mr-2" ${hookGames.includes('genshin') ? 'checked' : ''} onchange="handleGameChange(this)"> 
+            <label class="checkbox-label flex items-center gap-2 cursor-pointer select-none" style="${allGamesChecked ? 'opacity:0.5;' : ''}">
+              <input type="checkbox" class="hook-game-genshin accent-indigo w-5 h-5 mr-2" ${hookGames.includes('genshin') ? 'checked' : ''} ${allGamesChecked ? 'disabled' : ''} onchange="handleGameChange(this)"> 
               <span>Genshin</span>
             </label>
             
-            <label class="checkbox-label flex items-center gap-2 cursor-pointer select-none">
-              <input type="checkbox" class="hook-game-wuwa accent-indigo w-5 h-5 mr-2" ${hookGames.includes('wuwa') ? 'checked' : ''} onchange="handleGameChange(this)"> 
+            <label class="checkbox-label flex items-center gap-2 cursor-pointer select-none" style="${allGamesChecked ? 'opacity:0.5;' : ''}">
+              <input type="checkbox" class="hook-game-wuwa accent-indigo w-5 h-5 mr-2" ${hookGames.includes('wuwa') ? 'checked' : ''} ${allGamesChecked ? 'disabled' : ''} onchange="handleGameChange(this)"> 
               <span>WuWa</span>
             </label>
             
-            <label class="checkbox-label flex items-center gap-2 cursor-pointer select-none">
-              <input type="checkbox" class="hook-game-endfield accent-indigo w-5 h-5 mr-2" ${hookGames.includes('endfield') ? 'checked' : ''} onchange="handleGameChange(this)"> 
+            <label class="checkbox-label flex items-center gap-2 cursor-pointer select-none" style="${allGamesChecked ? 'opacity:0.5;' : ''}">
+              <input type="checkbox" class="hook-game-endfield accent-indigo w-5 h-5 mr-2" ${hookGames.includes('endfield') ? 'checked' : ''} ${allGamesChecked ? 'disabled' : ''} onchange="handleGameChange(this)"> 
               <span>Endfield</span>
             </label>
             
-            <label class="checkbox-label flex items-center gap-2 cursor-pointer select-none">
-              <input type="checkbox" class="hook-game-nte accent-indigo w-5 h-5 mr-2" ${hookGames.includes('nte') ? 'checked' : ''} onchange="handleGameChange(this)"> 
+            <label class="checkbox-label flex items-center gap-2 cursor-pointer select-none" style="${allGamesChecked ? 'opacity:0.5;' : ''}">
+              <input type="checkbox" class="hook-game-nte accent-indigo w-5 h-5 mr-2" ${hookGames.includes('nte') ? 'checked' : ''} ${allGamesChecked ? 'disabled' : ''} onchange="handleGameChange(this)"> 
               <span>NTE</span>
             </label>
           </div>
@@ -624,7 +628,14 @@ window.handleAllGamesChange = handleAllGamesChange;
 window.handleGameChange = handleGameChange;
 
 function toggleWebhookCard(index, event) {
-  if (event && (event.target.tagName === 'BUTTON' || event.target.closest('button') || event.target.tagName === 'INPUT')) {
+  if (event && (
+    event.target.closest('button') || 
+    event.target.closest('input') || 
+    event.target.closest('select') || 
+    event.target.closest('textarea') || 
+    event.target.closest('label') || 
+    event.target.closest('a')
+  )) {
     return;
   }
   expandedWebhookIndex = expandedWebhookIndex === index ? null : index;
@@ -879,7 +890,7 @@ document.getElementById("globalConfigForm")?.addEventListener("submit", async (e
     if (res.ok) {
       showToast("success", "Saved", "Global settings saved successfully!");
     } else {
-      showToast("error", "Save Failed", "Unauthorized token. Please verify Admin Token.");
+      showToast("error", "Save Failed", "Failed to save global settings.");
     }
   } catch (err) {
     showToast("error", "Error", err.message);
@@ -1008,7 +1019,7 @@ document.getElementById("runNowBtn")?.addEventListener("click", async () => {
       showToast("info", "Poll Started", "Live scrape initialized. Tracking progress...");
       pollRunStatus(btn);
     } else {
-      showToast("error", "Poll Failed", "Unauthorized token.");
+      showToast("error", "Poll Failed", "Failed to start poll run.");
       setButtonLoading(btn, false, "Run Poll Now");
     }
   } catch (err) {
@@ -1040,8 +1051,6 @@ document.getElementById("btnOpenDocs")?.addEventListener("click", () => {
 });
 
 document.getElementById("btnCloseDocs")?.addEventListener("click", () => docsModal?.classList.add("hidden"));
-document.getElementById("btnHelpToken")?.addEventListener("click", () => tokenHelpModal?.classList.remove("hidden"));
-document.getElementById("btnCloseTokenHelp")?.addEventListener("click", () => tokenHelpModal?.classList.add("hidden"));
 
 // Tab Navigation & Mobile Sidebar Handlers
 function closeMobileSidebar() {
@@ -1095,23 +1104,27 @@ function initMobileSidebar() {
   backdrop?.addEventListener("click", closeMobileSidebar);
 }
 
+function initKeyboardShortcuts() {
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "/" && document.activeElement?.tagName !== "INPUT" && document.activeElement?.tagName !== "TEXTAREA") {
+      e.preventDefault();
+      const input = document.getElementById("searchInput");
+      if (input) input.focus();
+    } else if (e.key === "Escape") {
+      document.querySelectorAll(".modal-overlay:not(.hidden)").forEach(m => m.classList.add("hidden"));
+    }
+  });
+}
+
 // Initial Run
 document.addEventListener('DOMContentLoaded', () => {
   console.log('Dashboard initialized with event handlers');
   initTabNavigation();
   initMobileSidebar();
+  initKeyboardShortcuts();
   loadVersion();
   loadDashboardData();
   
-  // Ensure checkbox event handlers are attached
-  setTimeout(() => {
-    const checkboxes = document.querySelectorAll('[class*="hook-game-"]');
-    checkboxes.forEach(cb => {
-      if (!cb.hasAttribute('onchange')) {
-        cb.setAttribute('onchange', cb.classList.contains('hook-all-games') ? 'handleAllGamesChange(this)' : 'handleGameChange(this)');
-      }
-    });
-    console.log('Event handlers verified:', checkboxes.length);
-  }, 500);
+  document.getElementById("btnCopyAllActive")?.addEventListener("click", copyAllActiveCodes);
 });
 
