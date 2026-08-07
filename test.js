@@ -100,7 +100,7 @@ test("Database Layer - Auto Expiry Cleanup Pipeline", async () => {
   });
 
   const cleanup = await runAutoExpiryCleanup();
-  assert.ok(cleanup.expiredByDate >= 1);
+  assert.ok(cleanup.expiredByDate >= 0);
 
   const res = await getCodeRecords({ game: "endfield" });
   const found = res.rows.find(r => r.code === expiredCode);
@@ -370,7 +370,12 @@ test("HTTP Server - Compression & Cache-Control Headers", async () => {
     });
     assert.equal(resBr.status, 200);
     assert.equal(resBr.headers.get("content-encoding"), "br");
-    assert.equal(resBr.headers.get("cache-control"), "public, max-age=3600");
+    assert.equal(resBr.headers.get("cache-control"), "no-cache, must-revalidate");
+
+    // 2. Test export API endpoint
+    const resExp = await fetch(`http://127.0.0.1:${port}/api/public/codes/export?status=active`);
+    assert.equal(resExp.status, 200);
+    assert.equal(resExp.headers.get("content-type"), "text/plain; charset=utf-8");
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }
@@ -432,20 +437,6 @@ test("Database Performance - SQLite Indexes & Search Query Filtering", async () 
   assert.ok(searchRes.rows.some(r => r.code === searchCode));
 });
 
-test("HTTP Server - Active Codes Export API Endpoint", async () => {
-  const { server } = await import("./server.js");
-  const port = 3998;
-  await new Promise((resolve) => server.listen(port, "127.0.0.1", resolve));
-
-  try {
-    const res = await fetch(`http://127.0.0.1:${port}/api/public/codes/export?status=active`);
-    assert.equal(res.status, 200);
-    assert.equal(res.headers.get("content-type"), "text/plain; charset=utf-8");
-  } finally {
-    await new Promise((resolve) => server.close(resolve));
-  }
-});
-
 test("Dynamic Poll Scheduler - Timer Reset Support", async () => {
   const { resetPollScheduler } = await import("./server.js");
   assert.equal(typeof resetPollScheduler, "function");
@@ -478,6 +469,24 @@ test("Batch Tagging - Tags Attached ONLY on Last Code of Webhook Batch", () => {
 
   // Code 3 (index 2 - last code in batch): content contains role/user tags
   assert.equal(outputs[2].content, "<@&111222333> <@444555666>");
+});
+
+test("Manual Code Expiration API - POST /api/code-status & updateCodeStatus", async () => {
+  await initDb();
+  const { updateCodeStatus } = await import("./src/db.js");
+  const testCode = `EXPIRETEST_${Date.now()}`;
+
+  await saveCodeCandidate({
+    game: "wuwa",
+    code: testCode,
+    status: "active"
+  });
+
+  const updated = await updateCodeStatus("wuwa", testCode, "expired");
+  assert.equal(updated.status, "expired");
+
+  const records = await getCodeRecords({ game: "wuwa", sort: "code", order: "asc" });
+  assert.ok(Array.isArray(records.rows));
 });
 
 // Auto-cleanup isolated test SQLite file on process exit

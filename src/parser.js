@@ -14,6 +14,40 @@ export function trimDuplicateCode(str) {
   return s;
 }
 
+// Helper: Parse and normalize raw expiration date strings into YYYY-MM-DD format
+export function parseExpiryDate(str) {
+  if (!str || typeof str !== "string") return null;
+  const clean = str.trim().replace(/\(.*?\)|\b(UTC|PT|ET|GMT|JST)\b/gi, "").trim();
+  if (!clean || /indef|valid|version|patch|exp/i.test(clean)) return null;
+
+  // Pattern 1: YYYY-MM-DD or YYYY/MM/DD
+  const isoMatch = clean.match(/\b(\d{4})[-/](\d{1,2})[-/](\d{1,2})\b/);
+  if (isoMatch) {
+    const [_, y, m, d] = isoMatch;
+    return `${y}-${m.padStart(2, "0")}-${d.padStart(2, "0")}`;
+  }
+
+  // Pattern 2: DD-MM-YYYY or DD/MM/YYYY
+  const dmyMatch = clean.match(/\b(\d{1,2})[-/](\d{1,2})[-/](\d{4})\b/);
+  if (dmyMatch) {
+    const [_, d, m, y] = dmyMatch;
+    return `${y}-${m.padStart(2, "0")}-${d.padStart(2, "0")}`;
+  }
+
+  // Pattern 3: Natural dates (e.g., "May 15, 2024", "15 May 2024", "2024 May 15")
+  const parsedMs = Date.parse(clean);
+  if (!isNaN(parsedMs)) {
+    const dateObj = new Date(parsedMs);
+    const yr = dateObj.getFullYear();
+    if (yr >= 2020 && yr <= 2100) {
+      const mStr = String(dateObj.getMonth() + 1).padStart(2, "0");
+      const dStr = String(dateObj.getDate()).padStart(2, "0");
+      return `${yr}-${mStr}-${dStr}`;
+    }
+  }
+  return null;
+}
+
 // Helper: Auto-detect codeType from context text (heading/paragraph)
 export function detectCodeType(code, contextText = "") {
   const text = (contextText || "").toLowerCase();

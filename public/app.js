@@ -9,6 +9,8 @@ let searchQuery = "";
 let currentPage = 1;
 const pageSize = 50;
 let totalCodesCount = 0;
+let currentSortColumn = null;
+let currentSortOrder = "desc";
 
 // Embedded API Documentation
 const EMBEDDED_DOCS_MD = `# RedeemRelay REST API Documentation
@@ -203,14 +205,21 @@ function renderCodesTable() {
         <td><span class="status-badge ${statusClass}">${status}</span></td>
         <td><span class="badge-verified" title="Confirmed by ${verifiedCount} sources">${verifiedCount} src</span></td>
         <td><span class="text-muted font-mono">${c.server || "All"}</span></td>
-        <td><span class="font-medium">${c.rewards || "N/A"}</span></td>
+        <td class="cell-rewards"><span class="font-medium">${c.rewards || "N/A"}</span></td>
         <td><span class="text-muted text-xs font-mono" title="${firstSeenTitle}">📅 ${firstSeenDate}</span></td>
         <td><span class="text-muted text-xs">${c.expires_at || "Unknown"}</span></td>
-        <td><span class="text-xs text-dim text-truncate" style="max-width:180px; display:inline-block;" title="${c.notes || ''}">${c.notes || '-'}</span></td>
+        <td class="cell-notes"><span class="text-xs text-dim" title="${c.notes || ''}">${c.notes || '-'}</span></td>
         <td class="text-right">
-          <a href="${redeemLink}" target="_blank" class="btn btn-secondary btn-sm" title="Redeem online">
-            <span>Redeem</span>
-          </a>
+          <div class="flex-row gap-8 justify-end">
+            ${status !== 'expired' ? `
+              <button class="btn btn-danger-xs" onclick="markCodeExpired('${c.game}', '${c.code}')" title="Mark this code as expired">
+                <span>Expire</span>
+              </button>
+            ` : ''}
+            <a href="${redeemLink}" target="_blank" class="btn btn-secondary btn-sm" title="Redeem online">
+              <span>Redeem</span>
+            </a>
+          </div>
         </td>
       </tr>
     `;
@@ -250,9 +259,10 @@ async function loadCodesFeed(skipProgressStop = false) {
     const gameParam = currentGameFilter === "all" ? "" : `&game=${currentGameFilter}`;
     const statusParam = currentStatusFilter === "all" ? "" : `&status=${currentStatusFilter}`;
     const searchParam = searchQuery ? `&search=${encodeURIComponent(searchQuery)}` : "";
+    const sortParam = currentSortColumn ? `&sort=${currentSortColumn}&order=${currentSortOrder}` : "";
     const offset = (currentPage - 1) * pageSize;
 
-    const res = await fetch(`/api/public/codes?limit=${pageSize}&offset=${offset}${gameParam}${statusParam}${searchParam}`);
+    const res = await fetch(`/api/public/codes?limit=${pageSize}&offset=${offset}${gameParam}${statusParam}${searchParam}${sortParam}`);
     if (res.ok) {
       const data = await res.json();
       cachedCodes = data.data || [];
@@ -265,6 +275,30 @@ async function loadCodesFeed(skipProgressStop = false) {
     if (!skipProgressStop) setProgressBar("stop");
   }
 }
+
+// Manual Code Expiration Handler
+async function markCodeExpired(game, code) {
+  if (!confirm(`Are you sure you want to mark code "${code}" as EXPIRED?`)) return;
+
+  try {
+    const res = await fetch("/api/code-status", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ game, code, status: "expired" })
+    });
+
+    if (res.ok) {
+      showToast("success", "Code Expired", `Code <strong>${code}</strong> marked as EXPIRED.`);
+      loadCodesFeed();
+      loadCodeCounts();
+    } else {
+      showToast("error", "Update Failed", "Failed to update code status.");
+    }
+  } catch (err) {
+    showToast("error", "Error", err.message);
+  }
+}
+window.markCodeExpired = markCodeExpired;
 
 // Copy All Active Codes Utility
 async function copyAllActiveCodes() {
@@ -352,7 +386,7 @@ function renderSourcesTable() {
           <strong>${s.id}</strong>
           <div class="text-xs text-muted">${s.type}</div>
         </td>
-        <td><a href="${s.url}" target="_blank" class="text-xs text-muted font-mono text-truncate" style="max-width:240px; display:inline-block;">${s.url}</a></td>
+        <td class="cell-url"><a href="${s.url}" target="_blank" class="table-link text-truncate" title="${s.url}">${s.url}</a></td>
         <td>${statusBadge}</td>
         <td>${httpBadge}</td>
         <td><strong class="font-mono">${s.last_codes_found || 0}</strong></td>
@@ -383,17 +417,27 @@ function renderLogsTable() {
 
   tbody.innerHTML = filtered.map(l => {
     const levelClass = l.level === "INFO" ? "log-info" : (l.level === "WARN" ? "log-warn" : "log-error");
-    const timestamp = new Date(l.timestamp).toLocaleTimeString();
+    
+    let timestamp = l.timestamp;
+    try {
+      const d = new Date(l.timestamp);
+      if (!isNaN(d.getTime())) {
+        const datePart = d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
+        const timePart = d.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: true });
+        timestamp = `${datePart}, ${timePart}`;
+      }
+    } catch {}
+
     const detailsStr = typeof l.details_json === "string" ? l.details_json : JSON.stringify(l.details_json || {});
 
     return `
       <tr>
         <td>#${l.id}</td>
-        <td><span class="text-muted">${timestamp}</span></td>
+        <td><span class="text-muted text-xs font-mono">${timestamp}</span></td>
         <td><span class="${levelClass}">${l.level}</span></td>
         <td><strong>${l.category}</strong></td>
         <td>${l.message}</td>
-        <td><span class="text-xs text-muted">${detailsStr}</span></td>
+        <td class="cell-details"><span class="text-xs text-muted text-truncate" title="${detailsStr.replace(/"/g, '&quot;')}">${detailsStr}</span></td>
       </tr>
     `;
   }).join("");
@@ -546,7 +590,7 @@ function renderWebhooksList() {
             <input type="checkbox" class="hook-enabled" ${hook.enabled ? 'checked' : ''}> Webhook Enabled
           </label>
 
-          <div class="flex-row gap-8">
+          <div class="flex-row gap-12">
             <button type="button" class="btn btn-secondary btn-sm" onclick="testSingleWebhook(${index})">
               <span>Test Payload</span>
             </button>
@@ -982,9 +1026,46 @@ document.getElementById("btnForceSend")?.addEventListener("click", async () => {
   }
 });
 
-// Poll Run Status Helper (Point 13)
+// Helper: Enforce 10-second cooldown on Run Poll button
+function startButtonCooldown(btn, cooldownSec = 10) {
+  if (!btn) return;
+  btn.disabled = true;
+  btn.classList.remove("btn-polling-active");
+  btn.classList.add("btn-cooldown");
+
+  const spinner = btn.querySelector(".btn-spinner");
+  if (spinner) spinner.classList.add("hidden");
+
+  const label = btn.querySelector("span");
+  let remaining = cooldownSec;
+
+  if (label) label.innerText = `Cooldown (${remaining}s)...`;
+
+  const cdTimer = setInterval(() => {
+    remaining--;
+    if (remaining > 0) {
+      if (label) label.innerText = `Cooldown (${remaining}s)...`;
+    } else {
+      clearInterval(cdTimer);
+      btn.disabled = false;
+      btn.classList.remove("btn-cooldown");
+      btn.classList.remove("btn-polling-active");
+      if (label) label.innerText = "Run Poll Now";
+    }
+  }, 1000);
+}
+
+// Poll Run Status Helper with Real-time Progress & 10s Cooldown Safety
 async function pollRunStatus(btn) {
   let isDone = false;
+
+  if (btn) {
+    btn.disabled = true;
+    btn.classList.add("btn-polling-active");
+    const spinner = btn.querySelector(".btn-spinner");
+    if (spinner) spinner.classList.remove("hidden");
+  }
+
   const timer = setInterval(async () => {
     try {
       const res = await fetch("/api/run-status");
@@ -993,18 +1074,22 @@ async function pollRunStatus(btn) {
         const p = data.progress;
         if (p) {
           const label = btn?.querySelector("span");
-          if (label) label.innerText = p.message || "Scraping...";
+          if (label && p.message) {
+            label.innerText = p.message;
+          }
 
           if (p.phase === "done" || p.phase === "error") {
             clearInterval(timer);
             isDone = true;
+
             if (p.phase === "done") {
               showToast("success", "Poll Complete", p.message || "Scrape completed successfully!");
             } else {
               showToast("error", "Poll Failed", p.message || "Scrape failed!");
             }
-            setButtonLoading(btn, false, "Run Poll Now");
+
             loadDashboardData();
+            startButtonCooldown(btn, 10);
           }
         }
       }
@@ -1015,16 +1100,23 @@ async function pollRunStatus(btn) {
     if (!isDone) {
       clearInterval(timer);
       showToast("warning", "Status Unknown", "Poll status tracking timed out. Check System Logs for details.");
-      setButtonLoading(btn, false, "Run Poll Now");
       loadDashboardData();
+      startButtonCooldown(btn, 10);
     }
-  }, 60000);
+  }, 90000);
 }
 
 // Run Now Button Handler
 document.getElementById("runNowBtn")?.addEventListener("click", async () => {
   const btn = document.getElementById("runNowBtn");
-  setButtonLoading(btn, true);
+  if (btn.disabled) return;
+
+  btn.disabled = true;
+  btn.classList.add("btn-polling-active");
+  const spinner = btn.querySelector(".btn-spinner");
+  if (spinner) spinner.classList.remove("hidden");
+  const label = btn.querySelector("span");
+  if (label) label.innerText = "Starting scrape...";
 
   try {
     const res = await fetch("/api/run-now", { method: "POST" });
@@ -1033,11 +1125,11 @@ document.getElementById("runNowBtn")?.addEventListener("click", async () => {
       pollRunStatus(btn);
     } else {
       showToast("error", "Poll Failed", "Failed to start poll run.");
-      setButtonLoading(btn, false, "Run Poll Now");
+      startButtonCooldown(btn, 5);
     }
   } catch (err) {
     showToast("error", "Error", err.message);
-    setButtonLoading(btn, false, "Run Poll Now");
+    startButtonCooldown(btn, 5);
   }
 });
 
@@ -1129,14 +1221,81 @@ function initKeyboardShortcuts() {
   });
 }
 
+function initTableSorting() {
+  const headers = document.querySelectorAll("#codesTable th.sortable");
+  headers.forEach(th => {
+    th.addEventListener("click", () => {
+      const col = th.getAttribute("data-sort");
+      if (!col) return;
+
+      if (currentSortColumn === col) {
+        currentSortOrder = currentSortOrder === "asc" ? "desc" : "asc";
+      } else {
+        currentSortColumn = col;
+        currentSortOrder = "desc";
+      }
+
+      // Update UI Header classes and sort icons
+      headers.forEach(h => {
+        h.classList.remove("sort-active");
+        const icon = h.querySelector(".sort-icon");
+        if (icon) icon.innerText = "↕";
+      });
+
+      th.classList.add("sort-active");
+      const activeIcon = th.querySelector(".sort-icon");
+      if (activeIcon) {
+        activeIcon.innerText = currentSortOrder === "asc" ? "▲" : "▼";
+      }
+
+      currentPage = 1;
+      showToast("info", "Sorting", `Sorting by ${col.toUpperCase()} (${currentSortOrder.toUpperCase()})...`, 1200);
+      loadCodesFeed();
+    });
+  });
+}
+
+function initSidebarCollapse() {
+  const btn = document.getElementById("btnToggleSidebarCollapse");
+  if (!btn) return;
+
+  const isCollapsed = localStorage.getItem("sidebar_collapsed") === "true";
+  if (isCollapsed) {
+    document.body.classList.add("sidebar-collapsed");
+  }
+
+  btn.addEventListener("click", () => {
+    document.body.classList.toggle("sidebar-collapsed");
+    const collapsedNow = document.body.classList.contains("sidebar-collapsed");
+    localStorage.setItem("sidebar_collapsed", String(collapsedNow));
+    showToast("info", "Sidebar", collapsedNow ? "Sidebar collapsed for extra canvas width" : "Sidebar expanded", 1200);
+  });
+}
+
+async function checkActivePollStateOnLoad() {
+  const btn = document.getElementById("runNowBtn");
+  try {
+    const res = await fetch("/api/run-status");
+    if (res.ok) {
+      const data = await res.json();
+      if (data.isPolling && btn) {
+        pollRunStatus(btn);
+      }
+    }
+  } catch {}
+}
+
 // Initial Run
 document.addEventListener('DOMContentLoaded', () => {
   console.log('Dashboard initialized with event handlers');
   initTabNavigation();
   initMobileSidebar();
+  initSidebarCollapse();
+  initTableSorting();
   initKeyboardShortcuts();
   loadVersion();
   loadDashboardData();
+  checkActivePollStateOnLoad();
   
   document.getElementById("btnCopyAllActive")?.addEventListener("click", copyAllActiveCodes);
 });

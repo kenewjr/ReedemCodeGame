@@ -1,6 +1,8 @@
 import { createClient } from "@libsql/client";
 import fs from "node:fs";
 import path from "node:path";
+import { parseExpiryDate } from "./parser.js";
+import { SOURCES } from "./sources.js";
 
 const DATA_DIR = path.resolve("data");
 if (!fs.existsSync(DATA_DIR)) {
@@ -14,6 +16,7 @@ function getDbPath() {
 }
 
 let client = null;
+
 export function getDbClient() {
   if (!client) {
     client = createClient({ url: getDbPath() });
@@ -22,11 +25,25 @@ export function getDbClient() {
 }
 
 export async function initDb() {
-  const db = getDbClient();
-  try {
-    await db.execute("PRAGMA busy_timeout = 5000;");
-    await db.execute("PRAGMA journal_mode = WAL;");
-  } catch {}
+  if (process.env.TEST_DB_PATH) {
+    client = createClient({ url: getDbPath() });
+  } else if (!client) {
+    client = createClient({ url: getDbPath() });
+  }
+  const db = client;
+
+  for (let attempt = 1; attempt <= 5; attempt++) {
+    try {
+      await db.execute("PRAGMA busy_timeout = 10000;");
+      await db.execute("PRAGMA journal_mode = WAL;");
+      break;
+    } catch (err) {
+      if (attempt === 5) break;
+      await new Promise(resolve => setTimeout(resolve, 300 * attempt));
+    }
+  }
+
+  const runDbSetup = async () => {
 
   await db.execute(`
     CREATE TABLE IF NOT EXISTS codes (
@@ -203,6 +220,20 @@ export async function initDb() {
     // Migration & Cleanup for misplaced discovered_at strings containing expiry timezones/text
     await db.execute(`UPDATE codes SET expires_at = discovered_at, discovered_at = '' WHERE discovered_at LIKE '%(PT)%' OR discovered_at LIKE '%UTC%' OR discovered_at LIKE '%Valid%'`);
   } catch {}
+};
+
+  for (let attempt = 1; attempt <= 5; attempt++) {
+    try {
+      await runDbSetup();
+      break;
+    } catch (err) {
+      if (err.message && err.message.includes("SQLITE_BUSY") && attempt < 5) {
+        await new Promise(resolve => setTimeout(resolve, 500 * attempt));
+      } else {
+        throw err;
+      }
+    }
+  }
 }
 
 export async function addLog(level, category, message, details = {}) {
@@ -240,9 +271,10 @@ export async function upsertSourceHealth(source) {
   });
 
   let failures = 0;
-  if (source.lastStatus === "error") {
-    const prev = existingRes.rows[0]?.consecutive_failures || 0;
-    failures = Number(prev) + 1;
+  const isError = source.lastStatus === "error" || (source.lastHttpStatus && source.lastHttpStatus >= 400);
+  if (isError) {
+    const prev = existingRes.rows[0]?.consecutive_failures;
+    failures = (prev !== undefined && prev !== null) ? Number(prev) + 1 : 1;
   }
 
   const isCircuitBroken = failures >= 5 ? 1 : 0;
@@ -283,13 +315,29 @@ export async function upsertSourceHealth(source) {
 
 export async function getAllSourceHealth() {
   const db = getDbClient();
+  const validIds = (SOURCES || []).map(s => s.id);
+
+  // Auto-clean orphaned sources from DB that are no longer in active SOURCES configuration (production only)
+  if (!process.env.TEST_DB_PATH && validIds.length > 0) {
+    const placeholders = validIds.map(() => "?").join(",");
+    try {
+      await db.execute({
+        sql: `DELETE FROM source_health WHERE id NOT IN (${placeholders})`,
+        args: validIds
+      });
+    } catch {}
+  }
+
   const res = await db.execute(`SELECT * FROM source_health ORDER BY game ASC, id ASC`);
   return res.rows;
 }
 
 export async function saveCodeCandidate(candidate) {
   const db = getDbClient();
-  const now = new Date().toISOString();
+  const now = new Date();
+  const nowIso = now.toISOString();
+  const todayStr = nowIso.split("T")[0];
+
   const getRes = await db.execute({
     sql: `SELECT * FROM codes WHERE game = ? AND code = ?`,
     args: [candidate.game, candidate.code]
@@ -299,8 +347,21 @@ export async function saveCodeCandidate(candidate) {
   let eventType = null;
   const newSources = candidate.sources || [];
 
+  // Expiration Validation 2: Parse raw expiration string & compare with current fetch date
+  const rawExpires = candidate.expires || (existing ? String(existing.expires_at || "") : "");
+  const isoParsedExpiry = parseExpiryDate(rawExpires);
+  const isPastExpiryDate = !!(isoParsedExpiry && isoParsedExpiry < todayStr);
+
+  // Expiration Validation 1 (Default Source Status) + Validation 2 (Date Comparison)
+  let computedStatus = candidate.status || "unconfirmed";
+  if (candidate.status === "expired" || isPastExpiryDate) {
+    computedStatus = "expired";
+  }
+
+  const finalExpiresAt = isoParsedExpiry || rawExpires || "";
+
   if (!existing) {
-    eventType = "new_code";
+    eventType = computedStatus === "expired" ? null : "new_code";
     await db.execute({
       sql: `
         INSERT INTO codes (
@@ -312,18 +373,18 @@ export async function saveCodeCandidate(candidate) {
       args: [
         candidate.game,
         candidate.code,
-        candidate.status || "unconfirmed",
+        computedStatus,
         candidate.codeType || "redeem",
         candidate.server || "All",
         candidate.rewards || "",
-        candidate.discovered || now.split("T")[0],
-        candidate.expires || "",
-        candidate.notes || "Initial candidate discovery",
+        candidate.discovered || todayStr,
+        finalExpiresAt,
+        isPastExpiryDate ? (candidate.notes ? `${candidate.notes} | Auto-expired: past parsed expiry` : "Auto-expired: past parsed expiry date") : (candidate.notes || "Initial candidate discovery"),
         candidate.needsReview ? 1 : 0,
         1,
         candidate.isManual ? 1 : 0,
-        now,
-        now,
+        nowIso,
+        nowIso,
         JSON.stringify(newSources)
       ]
     });
@@ -336,9 +397,9 @@ export async function saveCodeCandidate(candidate) {
     const mergedSources = Array.from(new Set([...oldSources, ...newSources]));
     const verifiedCount = mergedSources.length;
 
-    // Status 3-tier transition logic
+    // Status transition logic enforcing expiry rules
     let updatedStatus = String(existing.status);
-    if (existing.status === "expired" || candidate.status === "expired") {
+    if (existing.status === "expired" || computedStatus === "expired" || isPastExpiryDate) {
       updatedStatus = "expired";
       if (existing.status !== "expired") eventType = "expired_code";
     } else if (candidate.status === "active" || verifiedCount >= 2) {
@@ -349,7 +410,7 @@ export async function saveCodeCandidate(candidate) {
     const updatedCodeType = (candidate.codeType && candidate.codeType !== "redeem") ? candidate.codeType : String(existing.code_type || "redeem");
     const updatedServer = (candidate.server && candidate.server !== "All") ? candidate.server : String(existing.server || "All");
     const updatedRewards = (candidate.rewards && String(candidate.rewards).trim() !== "") ? candidate.rewards : String(existing.rewards || "");
-    const updatedExpires = (candidate.expires && String(candidate.expires).trim() !== "") ? candidate.expires : String(existing.expires_at || "");
+    const updatedExpires = finalExpiresAt || String(existing.expires_at || "");
     const updatedDiscovered = (candidate.discovered && String(candidate.discovered).trim() !== "") ? candidate.discovered : String(existing.discovered_at || "");
 
     let baseNotes = String(existing.notes || "")
@@ -359,6 +420,9 @@ export async function saveCodeCandidate(candidate) {
     let notes = baseNotes;
     if (verifiedCount >= 2) {
       notes = baseNotes ? `${baseNotes} | Verified by ${verifiedCount} sources` : `Verified by ${verifiedCount} sources`;
+    }
+    if (isPastExpiryDate && !notes.includes("Auto-expired")) {
+      notes = notes ? `${notes} | Auto-expired: past parsed expiry` : "Auto-expired: past parsed expiry date";
     }
 
     await db.execute({
@@ -387,7 +451,7 @@ export async function saveCodeCandidate(candidate) {
         notes,
         candidate.needsReview ? 1 : Number(existing.needs_review || 0),
         verifiedCount,
-        now,
+        nowIso,
         JSON.stringify(mergedSources),
         candidate.game,
         candidate.code
@@ -403,7 +467,25 @@ export async function saveCodeCandidate(candidate) {
   return { record: updatedRes.rows[0], eventType };
 }
 
-export async function getCodeRecords({ game, status, code_type, search, limit = 200, offset = 0 } = {}) {
+export async function updateCodeStatus(game, code, status) {
+  const db = getDbClient();
+  const validStatus = ["active", "unconfirmed", "expired"].includes(status) ? status : "expired";
+  const now = new Date().toISOString();
+
+  await db.execute({
+    sql: `UPDATE codes SET status = ?, last_seen_at = ? WHERE game = ? AND code = ?`,
+    args: [validStatus, now, game, code]
+  });
+
+  const res = await db.execute({
+    sql: `SELECT * FROM codes WHERE game = ? AND code = ?`,
+    args: [game, code]
+  });
+
+  return res.rows[0] || null;
+}
+
+export async function getCodeRecords({ game, status, code_type, search, sort, order, limit = 200, offset = 0 } = {}) {
   const db = getDbClient();
   let query = `SELECT * FROM codes WHERE 1=1`;
   const args = [];
@@ -429,7 +511,28 @@ export async function getCodeRecords({ game, status, code_type, search, limit = 
     args.push(term, term, term);
   }
 
-  query += ` ORDER BY CASE WHEN status = 'active' THEN 1 WHEN status = 'unconfirmed' THEN 2 ELSE 3 END, last_seen_at DESC LIMIT ? OFFSET ?`;
+  const validSortCols = {
+    game: "game",
+    code: "code",
+    code_type: "code_type",
+    status: "status",
+    verified_count: "verified_count",
+    server: "server",
+    rewards: "rewards",
+    first_seen: "first_seen_at",
+    first_seen_at: "first_seen_at",
+    discovered_at: "discovered_at",
+    expires_at: "expires_at"
+  };
+
+  const sortCol = validSortCols[sort] || null;
+  const sortDir = (order && order.toLowerCase() === "asc") ? "ASC" : "DESC";
+
+  if (sortCol) {
+    query += ` ORDER BY ${sortCol} ${sortDir}, last_seen_at DESC LIMIT ? OFFSET ?`;
+  } else {
+    query += ` ORDER BY CASE WHEN status = 'active' THEN 1 WHEN status = 'unconfirmed' THEN 2 ELSE 3 END, last_seen_at DESC LIMIT ? OFFSET ?`;
+  }
   const safeLimit = Math.min(Math.max(1, Number(limit) || 200), 1000);
   const safeOffset = Math.max(0, Number(offset) || 0);
   args.push(safeLimit, safeOffset);
@@ -504,6 +607,7 @@ export async function runAutoExpiryCleanup() {
   const todayStr = now.toISOString().split("T")[0];
   const twentyOneDaysAgo = new Date(now.getTime() - 21 * 24 * 60 * 60 * 1000).toISOString();
 
+  // 1. Direct ISO comparison
   const dateRes = await db.execute({
     sql: `
       UPDATE codes SET
@@ -514,6 +618,23 @@ export async function runAutoExpiryCleanup() {
     args: [todayStr]
   });
 
+  // 2. Natural language / Non-ISO date parsing cleanup
+  let extraExpiredByDate = 0;
+  const activeCodesRes = await db.execute(`SELECT game, code, expires_at, notes FROM codes WHERE status != 'expired' AND expires_at != ''`);
+  for (const row of activeCodesRes.rows) {
+    const parsedIso = parseExpiryDate(String(row.expires_at || ""));
+    if (parsedIso && parsedIso < todayStr) {
+      const baseNotes = String(row.notes || "");
+      const newNotes = baseNotes ? `${baseNotes} | Auto-expired: past parsed expiry date` : "Auto-expired: past parsed expiry date";
+      await db.execute({
+        sql: `UPDATE codes SET status = 'expired', expires_at = ?, notes = ? WHERE game = ? AND code = ?`,
+        args: [parsedIso, newNotes, String(row.game), String(row.code)]
+      });
+      extraExpiredByDate++;
+    }
+  }
+
+  // 3. Stale unconfirmed cleanup
   const unconfirmedRes = await db.execute({
     sql: `
       UPDATE codes SET
@@ -525,13 +646,22 @@ export async function runAutoExpiryCleanup() {
   });
 
   return {
-    expiredByDate: Number(dateRes.rowsAffected || 0),
+    expiredByDate: Number(dateRes.rowsAffected || 0) + extraExpiredByDate,
     expiredStaleUnconfirmed: Number(unconfirmedRes.rowsAffected || 0)
   };
 }
 
 export async function hasDelivered(game, code, webhookId, eventType) {
   const db = getDbClient();
+  // If eventType is 'new_code', check if ANY successful delivery exists for this code and webhook (even if force_sent previously)
+  if (eventType === "new_code") {
+    const res = await db.execute({
+      sql: `SELECT 1 FROM deliveries WHERE game = ? AND code = ? AND webhook_id = ? AND error = ''`,
+      args: [game, code, webhookId]
+    });
+    return res.rows.length > 0;
+  }
+
   const res = await db.execute({
     sql: `SELECT 1 FROM deliveries WHERE game = ? AND code = ? AND webhook_id = ? AND event_type = ? AND error = ''`,
     args: [game, code, webhookId, eventType]

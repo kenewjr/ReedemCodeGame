@@ -13,6 +13,7 @@ import {
   saveCodeCandidate, 
   getCodeRecords, 
   getCodeCounts,
+  updateCodeStatus,
   runAutoExpiryCleanup,
   hasDelivered, 
   recordDelivery, 
@@ -28,6 +29,21 @@ import { sendDiscordWebhook, publishDiscordMessage } from "./src/discord.js";
 import { fetchWithBypass } from "./src/fetcher.js";
 
 const PORT = process.env.PORT || 3000;
+
+// Simple In-Memory TTL Cache for High-Frequency Public APIs
+const apiCache = new Map();
+function getCachedApi(key) {
+  const item = apiCache.get(key);
+  if (item && (Date.now() - item.ts < 10000)) return item.data;
+  return null;
+}
+function setCachedApi(key, data) {
+  apiCache.set(key, { ts: Date.now(), data });
+}
+function clearApiCache() {
+  apiCache.clear();
+}
+
 let isPolling = false;
 
 // Global Live Progress State for /api/run-status
@@ -87,7 +103,7 @@ export function resetPollScheduler(seconds) {
     clearInterval(pollSchedulerTimer);
     pollSchedulerTimer = null;
   }
-  const sec = Math.max(15, Math.min(3600, Number(seconds) || 60));
+  const sec = Math.max(1, Number(seconds) || 60);
   pollSchedulerTimer = setInterval(() => {
     runPoll();
   }, sec * 1000);
@@ -312,11 +328,14 @@ async function runPoll() {
     // Run Auto-Expiry Cleanup Pipeline
     const cleanupResult = await runAutoExpiryCleanup();
     await finishRun(runId, "success", summary.fetchedSources, summary.newCodes, "", { ...summary, cleanup: cleanupResult });
-    await addLog("INFO", "POLL_FINISH", `Poll run #${runId} finished. New codes: ${summary.newCodes}`, summary);
+    
+    const finishMsg = `Poll run #${runId} finished: Scraped ${enabledGameIds.length} games (${summary.fetchedSources} sources). Discovered ${summary.newCodes} new code(s), sent ${summary.sentDeliveries} webhook delivery(ies).`;
+    await addLog("INFO", "POLL_FINISH", finishMsg, summary);
 
     pollProgress.phase = "done";
     pollProgress.finishedAt = new Date().toISOString();
     pollProgress.updatedAt = new Date().toISOString();
+    pollProgress.message = `Successfully scraped ${enabledGameIds.length} games (${summary.fetchedSources} sources). Found ${summary.newCodes} new code(s).`;
     pollProgress.message = `Poll completed successfully. ${summary.newCodes} new codes found.`;
     clearApiCache();
   } catch (err) {
@@ -450,8 +469,8 @@ const server = http.createServer(async (req, res) => {
       };
       const content = await fs.promises.readFile(filePath);
       const contentType = mimeTypes[ext] || "text/plain";
-      // Cache static assets (CSS/JS) for 1h, HTML for 0 (always revalidate)
-      const cacheControl = ext === ".html" ? "no-cache" : "public, max-age=3600";
+      // Disable persistent browser caching on static assets to ensure code updates load instantly
+      const cacheControl = "no-cache, must-revalidate";
 
       return respondWithCompression(req, res, 200, {
         "Content-Type": contentType,
@@ -477,19 +496,7 @@ const server = http.createServer(async (req, res) => {
     return sendJson(200, { ok: true, isPolling, progress: pollProgress });
   }
 
-// Simple In-Memory TTL Cache for High-Frequency Public APIs
-const apiCache = new Map();
-function getCachedApi(key) {
-  const item = apiCache.get(key);
-  if (item && (Date.now() - item.ts < 10000)) return item.data;
-  return null;
-}
-function setCachedApi(key, data) {
-  apiCache.set(key, { ts: Date.now(), data });
-}
-function clearApiCache() {
-  apiCache.clear();
-}
+
 
   if (url.pathname.startsWith("/api/public/")) {
     if (!checkRateLimit(clientIp, 60, 60000)) {
@@ -501,14 +508,16 @@ function clearApiCache() {
       const status = url.searchParams.get("status");
       const codeType = url.searchParams.get("code_type");
       const search = url.searchParams.get("search");
+      const sort = url.searchParams.get("sort");
+      const order = url.searchParams.get("order");
       const limit = parseInt(url.searchParams.get("limit") || "200", 10);
       const offset = parseInt(url.searchParams.get("offset") || "0", 10);
 
-      const cacheKey = `codes:${game || 'all'}:${status || 'all'}:${codeType || 'all'}:${search || ''}:${limit}:${offset}`;
+      const cacheKey = `codes:${game || 'all'}:${status || 'all'}:${codeType || 'all'}:${search || ''}:${sort || ''}:${order || ''}:${limit}:${offset}`;
       const cached = getCachedApi(cacheKey);
       if (cached) return sendJson(200, cached);
 
-      const result = await getCodeRecords({ game, status, code_type: codeType, search, limit, offset });
+      const result = await getCodeRecords({ game, status, code_type: codeType, search, sort, order, limit, offset });
       const responsePayload = {
         ok: true,
         data: result.rows,
@@ -589,6 +598,18 @@ function clearApiCache() {
     clearApiCache();
     await addLog("INFO", "MANUAL_CODE", `Manually added code ${cand.code} for ${cand.game}`);
     return sendJson(200, { ok: true, data: resData });
+  }
+
+  if (req.method === "POST" && url.pathname === "/api/code-status") {
+    const body = await readBody();
+    if (!body.game || !body.code || !body.status) {
+      return sendJson(400, { ok: false, error: "Missing required fields: game, code, status" });
+    }
+
+    const updated = await updateCodeStatus(body.game, body.code.trim().toUpperCase(), body.status);
+    clearApiCache();
+    await addLog("INFO", "MANUAL_STATUS_CHANGE", `Manually updated code ${body.code} (${body.game}) status to ${body.status}`);
+    return sendJson(200, { ok: true, data: updated });
   }
 
   // --- MANAGEMENT APIs ---
