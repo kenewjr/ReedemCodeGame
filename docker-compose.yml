@@ -16,7 +16,7 @@ services:
       camofox:
         condition: service_started
     healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3000/api/version"]
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000/api/version', r => process.exit(r.statusCode === 200 ? 0 : 1)).on('error', () => process.exit(1))"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -36,8 +36,10 @@ services:
     restart: always
     ports:
       - "9377:9377"
+    environment:
+      - CAMOFOX_API_KEY=kizoxy-secret-2026
     healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:9377"]
+      test: ["CMD", "curl", "-sf", "http://localhost:9377"]
       interval: 30s
       timeout: 10s
       retries: 3
