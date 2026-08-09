@@ -38,6 +38,8 @@ services:
       - "9377:9377"
     environment:
       - CAMOFOX_API_KEY=kizoxy-secret-2026
+      - DISPLAY=:99
+    shm_size: 512m
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:9377"]
       interval: 30s
