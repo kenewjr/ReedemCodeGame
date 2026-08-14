@@ -11,6 +11,7 @@ import {
   getCodeRecords, 
   getCodeCounts, 
   runAutoExpiryCleanup,
+  deleteExpiredCodes,
   upsertSourceHealth,
   getAllSourceHealth,
   deleteSourceHealth,
@@ -489,7 +490,72 @@ test("Manual Code Expiration API - POST /api/code-status & updateCodeStatus", as
   assert.ok(Array.isArray(records.rows));
 });
 
-// Auto-cleanup isolated test SQLite file on process exit
+test("Delete Expired Codes - deleteExpiredCodes DB function", async () => {
+  await initDb();
+  const expCode1 = `DEL_EXP1_${Date.now()}`;
+  const expCode2 = `DEL_EXP2_${Date.now()}`;
+
+  await saveCodeCandidate({ game: "hsr", code: expCode1, status: "expired" });
+  await saveCodeCandidate({ game: "genshin", code: expCode2, status: "expired" });
+
+  const deletedHsr = await deleteExpiredCodes("hsr");
+  assert.ok(deletedHsr >= 1);
+
+  const resHsr = await getCodeRecords({ game: "hsr", status: "expired" });
+  assert.ok(!resHsr.rows.some(r => r.code === expCode1));
+
+  const deletedAll = await deleteExpiredCodes("all");
+  assert.ok(deletedAll >= 0);
+});
+
+test("Expiry Date Sanitization - Corrupted expires_at strings cleared or normalized at write-time", async () => {
+  await initDb();
+  
+  // Case A: Dirty date string with trailing braces "2026-07-31}}" gets normalized to "2026-07-31"
+  const { record: recNormalized } = await saveCodeCandidate({
+    game: "nte",
+    code: `CORRUPT_EXP1_${Date.now()}`,
+    status: "active",
+    expires: "2026-07-31}}"
+  });
+  assert.equal(recNormalized.expires_at, "2026-07-31");
+
+  // Case B: Completely unparseable corrupt string "invalid-date-braces-}}" gets reset to ""
+  const { record: recCleared } = await saveCodeCandidate({
+    game: "nte",
+    code: `CORRUPT_EXP2_${Date.now()}`,
+    status: "active",
+    expires: "invalid-date-braces-}}"
+  });
+  assert.equal(recCleared.expires_at, "");
+
+  // Auto-expiry cleanup should not get stuck or crash on empty expires_at
+  const cleanup = await runAutoExpiryCleanup();
+  assert.ok(typeof cleanup.expiredByDate === "number");
+});
+
+test("Discord Embed - Footer timestamp uses first_seen_at when available", () => {
+  const customFirstSeen = "2026-01-15T08:30:00.000Z";
+  const embedData = {
+    game: "hsr",
+    code: "TIMESTAMPTEST",
+    rewards: "Stellar Jade*50",
+    first_seen_at: customFirstSeen
+  };
+
+  const rendered = renderDiscordEmbed(embedData);
+  assert.equal(rendered.embeds[0].timestamp, customFirstSeen);
+});
+
+// Auto-cleanup test database and remove all dummy test codes
+test.after(async () => {
+  try {
+    const { getDbClient } = await import("./src/db.js");
+    const db = getDbClient();
+    await db.execute("DELETE FROM codes WHERE code LIKE '%TEST%' OR code LIKE 'SEARCHTEST%' OR code LIKE 'CORRUPT_%' OR code LIKE 'TIMESTAMPTEST%' OR code LIKE 'HSRTEST%' OR code LIKE 'BATCHTEST%' OR code LIKE 'AUTOEXP%' OR code LIKE 'EXPIRE_DELETE_%' OR code LIKE 'NULLSAFE_%'");
+  } catch {}
+});
+
 process.on("exit", () => {
   try {
     if (process.env.TEST_DB_PATH && fs.existsSync(process.env.TEST_DB_PATH)) {

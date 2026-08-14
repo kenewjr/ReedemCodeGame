@@ -15,6 +15,7 @@ import {
   getCodeCounts,
   updateCodeStatus,
   runAutoExpiryCleanup,
+  deleteExpiredCodes,
   hasDelivered, 
   recordDelivery, 
   startRun, 
@@ -614,6 +615,14 @@ const server = http.createServer(async (req, res) => {
 
   // --- MANAGEMENT APIs ---
   if (url.pathname.startsWith("/api/config") || ["/api/run-now", "/api/test-webhook", "/api/force-send"].includes(url.pathname)) {
+
+    if (req.method === "DELETE" && url.pathname === "/api/config/codes/expired") {
+      const game = url.searchParams.get("game") || "all";
+      const deleted = await deleteExpiredCodes(game);
+      clearApiCache();
+      await addLog("INFO", "DELETE_EXPIRED_CODES", `Deleted ${deleted} expired code(s) for game: ${game}`);
+      return sendJson(200, { ok: true, deleted });
+    }
 
     if (req.method === "GET" && url.pathname === "/api/config") {
       return sendJson(200, { ok: true, config: loadConfig() });

@@ -1,4 +1,4 @@
-# RedeemRelay REST API Documentation (v2.4)
+# RedeemRelay REST API Documentation (v3.2.0)
 
 ## 1. Public Read-Only & Manual Code APIs (Rate Limited: 60 req/min per IP)
 
@@ -7,7 +7,7 @@ Returns current app version from `package.json`.
 
 **Response:**
 ```json
-{ "ok": true, "version": "2.4.0" }
+{ "ok": true, "version": "3.2.0" }
 ```
 
 ---
@@ -28,8 +28,8 @@ Returns live progress of the current/last poll run.
     "newCodesFound": 2,
     "savedCount": 45,
     "deliveriesSent": 4,
-    "startedAt": "2026-08-03T08:00:00Z",
-    "finishedAt": "2026-08-03T08:01:30Z",
+    "startedAt": "2026-08-14T08:00:00Z",
+    "finishedAt": "2026-08-14T08:01:30Z",
     "message": "Poll completed successfully. 2 new codes found."
   }
 }
@@ -61,14 +61,14 @@ Code list with pagination and filters.
       "code_type": "livestream",
       "server": "All",
       "rewards": "Stellar Jade x100, Refined Aether x4",
-      "discovered_at": "2026-07-03",
-      "expires_at": "2026-07-04",
+      "discovered_at": "2026-08-14",
+      "expires_at": "2026-08-15",
       "notes": "Verified by 3 sources",
       "needs_review": 0,
       "verified_count": 3,
       "is_manual": 0,
-      "first_seen_at": "2026-07-03T10:00:00Z",
-      "last_seen_at": "2026-07-30T08:00:00Z",
+      "first_seen_at": "2026-08-14T10:00:00Z",
+      "last_seen_at": "2026-08-14T12:00:00Z",
       "sources_json": "[\"https://hoyo-codes.seria.moe/...\"]"
     }
   ],
@@ -152,6 +152,25 @@ Insert code manually. Manual codes are protected from auto-expiry-by-absence.
 
 ---
 
+### `POST /api/code-status`
+Update status of an existing code manually.
+
+**Body:**
+```json
+{
+  "game": "hsr",
+  "code": "STARRAIL2026",
+  "status": "expired"
+}
+```
+
+**Response:**
+```json
+{ "ok": true, "message": "Code status updated successfully." }
+```
+
+---
+
 ## 2. Management & Configuration APIs
 
 ### `GET /api/config`
@@ -161,6 +180,21 @@ Returns full config.
 Update config. Validates `channelId` format (must be 17–20 digit snowflake or empty).
 
 **Body:** partial or full config object.
+
+---
+
+### `DELETE /api/config/codes/expired`
+Bulk delete all expired codes for a specified game or all games.
+
+**Query Parameters:**
+| Param | Values | Default |
+|-------|--------|---------|
+| `game` | `all`, `hsr`, `genshin`, `wuwa`, `endfield`, `nte` | `all` |
+
+**Response:**
+```json
+{ "ok": true, "deleted": 14, "game": "hsr" }
+```
 
 ---
 

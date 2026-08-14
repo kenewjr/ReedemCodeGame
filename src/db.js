@@ -1,7 +1,7 @@
 import { createClient } from "@libsql/client";
 import fs from "node:fs";
 import path from "node:path";
-import { parseExpiryDate } from "./parser.js";
+import { parseExpiryDate, cleanCodeString } from "./parser.js";
 import { SOURCES } from "./sources.js";
 
 const DATA_DIR = path.resolve("data");
@@ -219,6 +219,8 @@ export async function initDb() {
 
     // Migration & Cleanup for misplaced discovered_at strings containing expiry timezones/text
     await db.execute(`UPDATE codes SET expires_at = discovered_at, discovered_at = '' WHERE discovered_at LIKE '%(PT)%' OR discovered_at LIKE '%UTC%' OR discovered_at LIKE '%Valid%'`);
+    // Cleanup corrupt or invalid expires_at dates not matching YYYY-MM-DD format
+    await db.execute(`UPDATE codes SET expires_at = '' WHERE expires_at != '' AND expires_at NOT GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]'`);
   } catch {}
 };
 
@@ -334,6 +336,15 @@ export async function getAllSourceHealth() {
 
 export async function saveCodeCandidate(candidate) {
   const db = getDbClient();
+  const rawCode = cleanCodeString(candidate.code);
+  if (!rawCode || rawCode.length < 4 || rawCode.length > 35) {
+    return { record: null, eventType: null };
+  }
+  if (/^code\s*row/i.test(rawCode) || /header|footer/i.test(rawCode)) {
+    return { record: null, eventType: null };
+  }
+  candidate.code = rawCode;
+
   const now = new Date();
   const nowIso = now.toISOString();
   const todayStr = nowIso.split("T")[0];
@@ -358,7 +369,17 @@ export async function saveCodeCandidate(candidate) {
     computedStatus = "expired";
   }
 
-  const finalExpiresAt = isoParsedExpiry || rawExpires || "";
+  // Write-time validation: Ensure expires_at matches YYYY-MM-DD format or is empty
+  let finalExpiresAt = isoParsedExpiry || "";
+  if (!finalExpiresAt && rawExpires) {
+    const trimmed = String(rawExpires).trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
+      finalExpiresAt = trimmed;
+    }
+  }
+  if (finalExpiresAt && !/^\d{4}-\d{2}-\d{2}$/.test(finalExpiresAt)) {
+    finalExpiresAt = "";
+  }
 
   if (!existing) {
     eventType = computedStatus === "expired" ? null : "new_code";
@@ -410,7 +431,8 @@ export async function saveCodeCandidate(candidate) {
     const updatedCodeType = (candidate.codeType && candidate.codeType !== "redeem") ? candidate.codeType : String(existing.code_type || "redeem");
     const updatedServer = (candidate.server && candidate.server !== "All") ? candidate.server : String(existing.server || "All");
     const updatedRewards = (candidate.rewards && String(candidate.rewards).trim() !== "") ? candidate.rewards : String(existing.rewards || "");
-    const updatedExpires = finalExpiresAt || String(existing.expires_at || "");
+    const existingExpiresClean = (existing && /^\d{4}-\d{2}-\d{2}$/.test(String(existing.expires_at || ""))) ? String(existing.expires_at) : "";
+    const updatedExpires = finalExpiresAt || existingExpiresClean;
     const updatedDiscovered = (candidate.discovered && String(candidate.discovered).trim() !== "") ? candidate.discovered : String(existing.discovered_at || "");
 
     let baseNotes = String(existing.notes || "")
@@ -708,3 +730,16 @@ export async function finishRun(runId, status, itemsFound = 0, itemsUpserted = 0
     args: [new Date().toISOString(), status, itemsFound, itemsUpserted, error, JSON.stringify(meta), runId]
   });
 }
+
+export async function deleteExpiredCodes(game = null) {
+  const db = getDbClient();
+  let sql = `DELETE FROM codes WHERE status = 'expired'`;
+  const args = [];
+  if (game && game !== "all") {
+    sql += ` AND game = ?`;
+    args.push(game);
+  }
+  const res = await db.execute({ sql, args });
+  return Number(res.rowsAffected || 0);
+}
+

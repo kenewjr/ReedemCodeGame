@@ -70,6 +70,34 @@ function showToast(type, title, message, duration = 4000) {
   }, duration);
 }
 
+function showPersistentToast(id, type, title, message) {
+  const container = document.getElementById("toastContainer");
+  if (!container) return;
+  let toast = document.getElementById(id);
+  if (!toast) {
+    toast = document.createElement("div");
+    toast.id = id;
+    container.appendChild(toast);
+  }
+  toast.className = `toast toast-${type}`;
+  const icons = { success: "✅", error: "❌", warning: "⚠️", info: "⏳", loading: "🌀" };
+  toast.innerHTML = `
+    <div class="toast-icon ${type === 'info' || type === 'loading' ? 'animate-spin' : ''}">${icons[type] || "🔔"}</div>
+    <div class="toast-content">
+      <div class="toast-title">${title}</div>
+      <div class="toast-msg">${message}</div>
+    </div>
+  `;
+}
+
+function removeToast(id) {
+  const toast = document.getElementById(id);
+  if (toast) {
+    toast.classList.add("toast-out");
+    setTimeout(() => toast.remove(), 300);
+  }
+}
+
 // Progress Bar Helper
 let progressBarTimer = null;
 function setProgressBar(state) {
@@ -86,10 +114,6 @@ function setProgressBar(state) {
     setTimeout(() => { bar.className = "progress-bar-top"; }, 400);
   }
 }
-
-
-
-
 
 // Filter Pills
 document.querySelectorAll("#gameFilter .pill").forEach(pill => {
@@ -133,18 +157,22 @@ function copyToClipboard(text) {
     showToast("error", "Copy Failed", err.message);
   });
 }
+window.copyToClipboard = copyToClipboard;
 
-// Game Badge Component
+// Game Badge Component with official icon images
 function getGameBadge(game) {
   const meta = {
-    hsr: { icon: "✨", name: "Star Rail" },
-    genshin: { icon: "⚔️", name: "Genshin" },
-    wuwa: { icon: "🌀", name: "WuWa" },
-    endfield: { icon: "🛡️", name: "Endfield" },
-    nte: { icon: "🌆", name: "NTE" }
+    hsr: { icon: "/assets/icons/hsr.png", emoji: "✨", name: "Star Rail" },
+    genshin: { icon: "/assets/icons/genshin.png", emoji: "⚔️", name: "Genshin" },
+    wuwa: { icon: "/assets/icons/wuwa.png", emoji: "🌀", name: "WuWa" },
+    endfield: { icon: "/assets/icons/endfield.png", emoji: "🛡️", name: "Endfield" },
+    nte: { icon: "/assets/icons/nte.png", emoji: "🌆", name: "NTE" }
   };
-  const g = meta[game] || { icon: "🎮", name: game };
-  return `<span class="game-badge"><span>${g.icon}</span> <span>${g.name}</span></span>`;
+  const g = meta[game] || { icon: "", emoji: "🎮", name: game };
+  const iconHtml = g.icon 
+    ? `<img src="${g.icon}" alt="${g.name}" class="game-icon-img" onerror="this.outerHTML='<span>${g.emoji}</span>'">` 
+    : `<span>${g.emoji}</span>`;
+  return `<span class="game-badge game-badge-${game}">${iconHtml} <span>${g.name}</span></span>`;
 }
 
 // Redeem URL Mapper
@@ -156,6 +184,162 @@ function getRedeemUrl(game, code) {
   if (game === "nte") return `https://nte.hotta.hk/`;
   return "#";
 }
+
+// Render Dashboard 5-Game Matrix Cards
+function renderDashboardGameCards(summary = {}) {
+  const container = document.getElementById("gameMatrixGrid");
+  if (!container) return;
+
+  const games = [
+    {
+      id: "hsr",
+      name: "Honkai: Star Rail",
+      short: "Star Rail",
+      icon: "/assets/icons/hsr.png",
+      emoji: "✨",
+      colorClass: "card-hsr",
+      type: "Turn-Based RPG",
+      webRedeem: true
+    },
+    {
+      id: "genshin",
+      name: "Genshin Impact",
+      short: "Genshin",
+      icon: "/assets/icons/genshin.png",
+      emoji: "⚔️",
+      colorClass: "card-genshin",
+      type: "Open-World ARPG",
+      webRedeem: true
+    },
+    {
+      id: "wuwa",
+      name: "Wuthering Waves",
+      short: "WuWa",
+      icon: "/assets/icons/wuwa.png",
+      emoji: "🌀",
+      colorClass: "card-wuwa",
+      type: "Action Open-World",
+      webRedeem: false
+    },
+    {
+      id: "endfield",
+      name: "Arknights: Endfield",
+      short: "Endfield",
+      icon: "/assets/icons/endfield.png",
+      emoji: "🛡️",
+      colorClass: "card-endfield",
+      type: "3D Real-Time RPG",
+      webRedeem: false
+    },
+    {
+      id: "nte",
+      name: "Neverness to Everness",
+      short: "NTE",
+      icon: "/assets/icons/nte.png",
+      emoji: "🌆",
+      colorClass: "card-nte",
+      type: "Supernatural Urban RPG",
+      webRedeem: false
+    }
+  ];
+
+  const byGame = summary.byGame || {};
+
+  container.innerHTML = games.map(g => {
+    const stats = byGame[g.id] || { active: 0, total: 0 };
+    const activeCount = stats.active || 0;
+    const totalCount = stats.total || 0;
+    const webBadge = g.webRedeem 
+      ? `<span class="badge-type badge-livestream text-xs">Web Redeem ✓</span>` 
+      : `<span class="badge-type badge-unconfirmed text-xs">In-Game Only</span>`;
+
+    return `
+      <div class="game-matrix-card ${g.colorClass}" onclick="filterByGameFromDashboard('${g.id}')" title="Filter feed for ${g.name}">
+        <div>
+          <div class="card-top">
+            <img src="${g.icon}" alt="${g.name}" class="game-icon-large" onerror="this.outerHTML='<span class=\\'text-2xl\\'>${g.emoji}</span>'">
+            <div class="overflow-hidden">
+              <div class="game-title text-truncate">${g.short}</div>
+              <div class="game-meta-type text-truncate">${g.type}</div>
+            </div>
+          </div>
+          <div class="card-counts">
+            <span class="active-num">${activeCount}</span>
+            <span class="total-num">/ ${totalCount} total</span>
+          </div>
+          <div class="mb-8">
+            ${webBadge}
+          </div>
+        </div>
+        <div class="card-action">
+          <span>View Codes &rarr;</span>
+          <span class="font-mono text-xs text-muted">${activeCount} active</span>
+        </div>
+      </div>
+    `;
+  }).join("");
+}
+
+// Render Latest Discovered Codes Stream on Dashboard Hub
+async function renderLatestCodesStream() {
+  const container = document.getElementById("recentStreamContainer");
+  if (!container) return;
+
+  try {
+    const res = await fetch("/api/public/codes?limit=5&sort=first_seen_at&order=desc");
+    if (res.ok) {
+      const data = await res.json();
+      const rows = data.data || [];
+      if (rows.length === 0) {
+        container.innerHTML = `<div class="text-center py-4 text-muted text-xs">No recent codes discovered yet. Trigger a poll.</div>`;
+        return;
+      }
+
+      container.innerHTML = rows.map(r => {
+        const gameBadge = getGameBadge(r.game);
+        const status = r.status || "unconfirmed";
+        const statusClass = status === "active" ? "badge-active" : (status === "expired" ? "badge-expired" : "badge-unconfirmed");
+        const firstSeen = r.first_seen_at ? r.first_seen_at.split("T")[0] : (r.discovered_at || "-");
+
+        return `
+          <div class="stream-item">
+            <div class="stream-left">
+              ${gameBadge}
+              <div class="code-clickable" onclick="copyToClipboard('${r.code}')" title="Click to copy code ${r.code}">
+                <strong class="font-mono text-sm code-text">${r.code}</strong>
+                <span class="copy-hint-icon">📋</span>
+              </div>
+              <span class="status-badge ${statusClass}">${status}</span>
+            </div>
+            <div class="stream-right">
+              <span class="text-xs text-muted font-mono">📅 ${firstSeen}</span>
+            </div>
+          </div>
+        `;
+      }).join("");
+    }
+  } catch (e) {
+    console.error("Recent stream fetch error:", e);
+  }
+}
+
+// Navigation helpers
+function navigateToTab(tabId) {
+  const navBtn = document.querySelector(`.nav-item[data-tab="${tabId}"]`);
+  if (navBtn) navBtn.click();
+}
+window.navigateToTab = navigateToTab;
+
+function filterByGameFromDashboard(game) {
+  navigateToTab("codesTab");
+  const pills = document.querySelectorAll("#gameFilter .pill");
+  pills.forEach(p => {
+    if (p.getAttribute("data-game") === game) {
+      p.click();
+    }
+  });
+}
+window.filterByGameFromDashboard = filterByGameFromDashboard;
 
 // Render Codes Table
 function renderCodesTable() {
@@ -194,11 +378,9 @@ function renderCodesTable() {
       <tr>
         <td>${getGameBadge(c.game)}</td>
         <td>
-          <div class="code-cell flex-row gap-16">
-            <strong class="font-mono">${c.code}</strong>
-            <button class="btn-copy" onclick="copyToClipboard('${c.code}')" title="Copy Code">
-              📋
-            </button>
+          <div class="code-clickable" onclick="copyToClipboard('${c.code}')" title="Click to copy code ${c.code}">
+            <strong class="font-mono code-text">${c.code}</strong>
+            <span class="copy-hint-icon">📋</span>
           </div>
         </td>
         <td><span class="badge-type ${typeClass}">${codeType}</span></td>
@@ -252,9 +434,12 @@ document.getElementById("btnNextPage")?.addEventListener("click", () => {
   }
 });
 
+let isSortingLoading = false;
+
 // Fetch Codes Feed per game independently
-async function loadCodesFeed(skipProgressStop = false) {
+async function loadCodesFeed(skipProgressStop = false, isSort = false) {
   setProgressBar("start");
+  const table = document.getElementById("codesTable");
   try {
     const gameParam = currentGameFilter === "all" ? "" : `&game=${currentGameFilter}`;
     const statusParam = currentStatusFilter === "all" ? "" : `&status=${currentStatusFilter}`;
@@ -273,6 +458,14 @@ async function loadCodesFeed(skipProgressStop = false) {
     console.error("Codes feed fetch error:", err);
   } finally {
     if (!skipProgressStop) setProgressBar("stop");
+    if (isSort || isSortingLoading) {
+      isSortingLoading = false;
+      removeToast("sortToast");
+      if (table) table.classList.remove("table-sorting-locked");
+      if (isSort && currentSortColumn) {
+        showToast("success", "Sorting Selesai", `Data berhasil diurutkan berdasarkan <strong>${currentSortColumn.toUpperCase()}</strong> (${currentSortOrder.toUpperCase()}).`, 2500);
+      }
+    }
   }
 }
 
@@ -322,7 +515,7 @@ async function copyAllActiveCodes() {
   }
 }
 
-// Fetch Code Counts Breakdown
+// Fetch Code Counts Breakdown & Update Dashboard Matrix
 async function loadCodeCounts() {
   try {
     const res = await fetch("/api/public/codes/count");
@@ -331,6 +524,10 @@ async function loadCodeCounts() {
       const summary = data.data || {};
       document.getElementById("statTotalCodes").innerText = summary.total || 0;
       document.getElementById("statActiveCodes").innerText = summary.active || 0;
+      const sidebarBadge = document.getElementById("sidebarCodesBadge");
+      if (sidebarBadge) sidebarBadge.innerText = summary.active || 0;
+      renderDashboardGameCards(summary);
+      renderLatestCodesStream();
     }
   } catch (err) {
     console.error("Counts fetch error:", err);
@@ -493,114 +690,113 @@ function renderWebhooksList() {
           <span class="webhook-card-chevron">▼</span>
           <span>🔔 ${hook.name || `Webhook #${index + 1}`}</span>
         </div>
-        <div class="flex-row gap-8 align-center">
+        <div class="flex-row gap-10 align-center">
           ${gamesBadge}
+          <label class="switch-toggle" onclick="event.stopPropagation()" title="Toggle Webhook Enable/Disable">
+            <input type="checkbox" ${hook.enabled ? 'checked' : ''} onchange="toggleWebhookEnabledDirect(${index}, this.checked, event)">
+            <span class="switch-slider"></span>
+          </label>
           ${statusBadge}
         </div>
       </div>
 
       <div class="webhook-card-body">
-        <div class="form-row gap-16">
+        <div class="form-row gap-8">
           <div class="form-group flex-1">
             <label>Webhook Label / Name</label>
-            <input type="text" class="input-styled hook-name" value="${hook.name || ''}" placeholder="e.g. #hsr-announcements">
+            <input type="text" class="input-styled hook-name text-xs" value="${hook.name || ''}" placeholder="e.g. #hsr-announcements">
           </div>
           <div class="form-group flex-1">
             <label>Discord Webhook URL</label>
-            <input type="url" class="input-styled hook-url" value="${hook.url || ''}" placeholder="https://discord.com/api/webhooks/...">
+            <input type="url" class="input-styled hook-url text-xs font-mono" value="${hook.url || ''}" placeholder="https://discord.com/api/webhooks/...">
           </div>
         </div>
 
         <!-- Game Scope Selection -->
-        <div class="form-group mt-12">
-          <label class="font-bold text-xs mb-8 block">Target Games for this Webhook:</label>
-          <div class="checkbox-group mt-4 p-4 rounded-lg bg-black/20 border border-border-color">
-            <label class="checkbox-label flex items-center gap-2 cursor-pointer select-none">
-              <input type="checkbox" class="hook-all-games accent-indigo w-5 h-5 mr-2" ${allGamesChecked ? 'checked' : ''} onchange="handleAllGamesChange(this)"> 
+        <div class="form-group mt-6">
+          <label class="font-bold text-xs mb-2 block">Target Games for this Webhook:</label>
+          <div class="checkbox-group p-2 rounded-lg bg-black/20 border border-border-color gap-8">
+            <label class="checkbox-label flex items-center gap-2 cursor-pointer select-none text-xs">
+              <input type="checkbox" class="hook-all-games accent-indigo w-4 h-4" ${allGamesChecked ? 'checked' : ''} onchange="handleAllGamesChange(this)"> 
               <span>All Games</span>
             </label>
             
-            <label class="checkbox-label flex items-center gap-2 cursor-pointer select-none" style="${allGamesChecked ? 'opacity:0.5;' : ''}">
-              <input type="checkbox" class="hook-game-hsr accent-indigo w-5 h-5 mr-2" ${hookGames.includes('hsr') ? 'checked' : ''} ${allGamesChecked ? 'disabled' : ''} onchange="handleGameChange(this)"> 
+            <label class="checkbox-label flex items-center gap-2 cursor-pointer select-none text-xs" style="${allGamesChecked ? 'opacity:0.5;' : ''}">
+              <input type="checkbox" class="hook-game-hsr accent-indigo w-4 h-4" ${hookGames.includes('hsr') ? 'checked' : ''} ${allGamesChecked ? 'disabled' : ''} onchange="handleGameChange(this)"> 
               <span>HSR</span>
             </label>
             
-            <label class="checkbox-label flex items-center gap-2 cursor-pointer select-none" style="${allGamesChecked ? 'opacity:0.5;' : ''}">
-              <input type="checkbox" class="hook-game-genshin accent-indigo w-5 h-5 mr-2" ${hookGames.includes('genshin') ? 'checked' : ''} ${allGamesChecked ? 'disabled' : ''} onchange="handleGameChange(this)"> 
+            <label class="checkbox-label flex items-center gap-2 cursor-pointer select-none text-xs" style="${allGamesChecked ? 'opacity:0.5;' : ''}">
+              <input type="checkbox" class="hook-game-genshin accent-indigo w-4 h-4" ${hookGames.includes('genshin') ? 'checked' : ''} ${allGamesChecked ? 'disabled' : ''} onchange="handleGameChange(this)"> 
               <span>Genshin</span>
             </label>
             
-            <label class="checkbox-label flex items-center gap-2 cursor-pointer select-none" style="${allGamesChecked ? 'opacity:0.5;' : ''}">
-              <input type="checkbox" class="hook-game-wuwa accent-indigo w-5 h-5 mr-2" ${hookGames.includes('wuwa') ? 'checked' : ''} ${allGamesChecked ? 'disabled' : ''} onchange="handleGameChange(this)"> 
+            <label class="checkbox-label flex items-center gap-2 cursor-pointer select-none text-xs" style="${allGamesChecked ? 'opacity:0.5;' : ''}">
+              <input type="checkbox" class="hook-game-wuwa accent-indigo w-4 h-4" ${hookGames.includes('wuwa') ? 'checked' : ''} ${allGamesChecked ? 'disabled' : ''} onchange="handleGameChange(this)"> 
               <span>WuWa</span>
             </label>
             
-            <label class="checkbox-label flex items-center gap-2 cursor-pointer select-none" style="${allGamesChecked ? 'opacity:0.5;' : ''}">
-              <input type="checkbox" class="hook-game-endfield accent-indigo w-5 h-5 mr-2" ${hookGames.includes('endfield') ? 'checked' : ''} ${allGamesChecked ? 'disabled' : ''} onchange="handleGameChange(this)"> 
+            <label class="checkbox-label flex items-center gap-2 cursor-pointer select-none text-xs" style="${allGamesChecked ? 'opacity:0.5;' : ''}">
+              <input type="checkbox" class="hook-game-endfield accent-indigo w-4 h-4" ${hookGames.includes('endfield') ? 'checked' : ''} ${allGamesChecked ? 'disabled' : ''} onchange="handleGameChange(this)"> 
               <span>Endfield</span>
             </label>
             
-            <label class="checkbox-label flex items-center gap-2 cursor-pointer select-none" style="${allGamesChecked ? 'opacity:0.5;' : ''}">
-              <input type="checkbox" class="hook-game-nte accent-indigo w-5 h-5 mr-2" ${hookGames.includes('nte') ? 'checked' : ''} ${allGamesChecked ? 'disabled' : ''} onchange="handleGameChange(this)"> 
+            <label class="checkbox-label flex items-center gap-2 cursor-pointer select-none text-xs" style="${allGamesChecked ? 'opacity:0.5;' : ''}">
+              <input type="checkbox" class="hook-game-nte accent-indigo w-4 h-4" ${hookGames.includes('nte') ? 'checked' : ''} ${allGamesChecked ? 'disabled' : ''} onchange="handleGameChange(this)"> 
               <span>NTE</span>
             </label>
           </div>
         </div>
 
         <!-- Avatar, Username & Auto-Publish Settings -->
-        <div class="form-row gap-16 mt-12">
+        <div class="form-row gap-8 mt-6">
           <div class="form-group flex-1">
             <label>Custom Webhook Username</label>
-            <input type="text" class="input-styled hook-username" value="${hook.username || ''}" placeholder="e.g. Honkai Code Relay">
+            <input type="text" class="input-styled hook-username text-xs" value="${hook.username || ''}" placeholder="e.g. Honkai Code Relay">
           </div>
           <div class="form-group flex-1">
             <label>Custom Webhook Avatar URL</label>
-            <input type="url" class="input-styled hook-avatar" value="${hook.avatarUrl || ''}" placeholder="https://example.com/avatar.png">
+            <input type="url" class="input-styled hook-avatar text-xs" value="${hook.avatarUrl || ''}" placeholder="https://example.com/avatar.png">
           </div>
         </div>
 
-        <div class="form-row gap-16 mt-12">
+        <div class="form-row gap-8 mt-6">
           <div class="form-group flex-1">
-            <label>
+            <label class="flex items-center gap-2 text-xs">
               <input type="checkbox" class="hook-autopublish" ${hook.autoPublish ? 'checked' : ''}> Enable Discord Auto-Publish (Announcement Crosspost)
             </label>
-            <input type="text" class="input-styled hook-channelid mt-12" value="${hook.channelId || ''}" placeholder="Discord Announcement Channel ID (Required for Auto-Publish)">
-            <span class="text-xs text-muted mt-4 block">Klik kanan channel di Discord (aktifkan Developer Mode dulu) &rarr; Copy Channel ID. Harus angka semua.</span>
+            <input type="text" class="input-styled hook-channelid text-xs mt-2" value="${hook.channelId || ''}" placeholder="Discord Announcement Channel ID (Required for Auto-Publish)">
+            <span class="text-xs text-muted mt-1 block">Klik kanan channel di Discord &rarr; Copy Channel ID. Harus 17-20 digit angka.</span>
           </div>
         </div>
 
-        <div class="form-row gap-16 mt-12">
+        <div class="form-row gap-8 mt-6">
           <div class="form-group flex-1">
             <label>Role IDs to Tag (Comma separated)</label>
-            <input type="text" class="input-styled hook-roles" value="${(hook.rolesToTag || []).join(', ')}" placeholder="123456789">
+            <input type="text" class="input-styled hook-roles text-xs font-mono" value="${(hook.rolesToTag || []).join(', ')}" placeholder="123456789">
           </div>
           <div class="form-group flex-1">
             <label>User IDs to Tag (Comma separated)</label>
-            <input type="text" class="input-styled hook-users" value="${(hook.usersToTag || []).join(', ')}" placeholder="987654321">
+            <input type="text" class="input-styled hook-users text-xs font-mono" value="${(hook.usersToTag || []).join(', ')}" placeholder="987654321">
           </div>
         </div>
 
-        <div class="form-group mt-12">
+        <div class="form-group mt-6">
           <label>Custom Message Template (Leave blank to use Discord Embed)</label>
-          <textarea rows="2" class="textarea-styled font-mono hook-msg" placeholder="Default Discord Embed used if empty...">${hook.customMessage || ''}</textarea>
+          <textarea rows="2" class="textarea-styled font-mono hook-msg text-xs" placeholder="Default Discord Embed used if empty...">${hook.customMessage || ''}</textarea>
         </div>
 
-        <div class="flex-between mt-16 pt-12 border-t">
-          <label class="text-xs font-bold text-muted flex-row gap-8 align-center">
-            <input type="checkbox" class="hook-enabled" ${hook.enabled ? 'checked' : ''}> Webhook Enabled
-          </label>
-
-          <div class="flex-row gap-12">
-            <button type="button" class="btn btn-secondary btn-sm" onclick="testSingleWebhook(${index})">
-              <span>Test Payload</span>
-            </button>
-            <button type="button" class="btn btn-danger-sm" onclick="deleteSingleWebhook(${index})">
-              <span>Delete</span>
-            </button>
-            <button type="button" class="btn btn-primary btn-sm" onclick="saveSingleWebhook(${index})">
-              <span>Save Webhook</span>
-            </button>
-          </div>
+        <!-- Footer Action Buttons (Right-aligned, tight) -->
+        <div class="flex-row justify-end gap-8 mt-8 pt-8 border-t">
+          <button type="button" class="btn btn-secondary btn-sm" onclick="testSingleWebhook(${index})">
+            <span>Test Payload</span>
+          </button>
+          <button type="button" class="btn btn-danger-sm btn-sm" onclick="deleteSingleWebhook(${index})">
+            <span>Delete</span>
+          </button>
+          <button type="button" class="btn btn-primary btn-sm" onclick="saveSingleWebhook(${index})">
+            <span>Save Webhook</span>
+          </button>
         </div>
       </div>
     </div>
@@ -609,6 +805,34 @@ function renderWebhooksList() {
 
   document.getElementById("statWebhooksCount").innerText = cachedWebhooks.filter(w => w.enabled && w.url).length;
 }
+
+// Toggle webhook enabled directly from header switch
+async function toggleWebhookEnabledDirect(index, isEnabled, event) {
+  if (event) event.stopPropagation();
+  if (!cachedWebhooks[index]) return;
+  cachedWebhooks[index].enabled = isEnabled;
+  
+  renderWebhooksList();
+  
+  try {
+    const res = await fetch("/api/config", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        pollSeconds: Number(document.getElementById("pollSeconds")?.value || 60),
+        discordBotToken: document.getElementById("discordBotToken")?.value || "",
+        defaultMessageTemplate: document.getElementById("defaultMessageTemplate")?.value || "",
+        webhooks: cachedWebhooks
+      })
+    });
+    if (res.ok) {
+      showToast("success", "Webhook Status", `Webhook #${index + 1} is now ${isEnabled ? "ENABLED" : "DISABLED"}.`, 2000);
+    }
+  } catch (err) {
+    showToast("error", "Save Failed", err.message);
+  }
+}
+window.toggleWebhookEnabledDirect = toggleWebhookEnabledDirect;
 
 // All Games Checkbox Logic
 function handleAllGamesChange(checkbox) {
@@ -759,7 +983,7 @@ async function saveSingleWebhook(index) {
     avatarUrl: card.querySelector(".hook-avatar").value.trim(),
     autoPublish: card.querySelector(".hook-autopublish").checked,
     channelId,
-    enabled: card.querySelector(".hook-enabled").checked,
+    enabled: card.querySelector(".hook-enabled") ? card.querySelector(".hook-enabled").checked : cachedWebhooks[index]?.enabled !== false,
     allGames,
     games: selectedGames,
     rolesToTag: roles,
@@ -1225,6 +1449,8 @@ function initTableSorting() {
   const headers = document.querySelectorAll("#codesTable th.sortable");
   headers.forEach(th => {
     th.addEventListener("click", () => {
+      if (isSortingLoading) return;
+
       const col = th.getAttribute("data-sort");
       if (!col) return;
 
@@ -1249,24 +1475,31 @@ function initTableSorting() {
       }
 
       currentPage = 1;
-      showToast("info", "Sorting", `Sorting by ${col.toUpperCase()} (${currentSortOrder.toUpperCase()})...`, 1200);
-      loadCodesFeed();
+      isSortingLoading = true;
+      const table = document.getElementById("codesTable");
+      if (table) table.classList.add("table-sorting-locked");
+
+      showPersistentToast("sortToast", "info", "Sedang Mengurutkan Data...", `Mengurutkan data berdasarkan kolom <strong>${col.toUpperCase()}</strong> (${currentSortOrder.toUpperCase()}). Harap tunggu...`);
+      loadCodesFeed(false, true);
     });
   });
 }
 
 function initSidebarCollapse() {
   const btn = document.getElementById("btnToggleSidebarCollapse");
+  const sidebar = document.getElementById("sidebar");
   if (!btn) return;
 
   const isCollapsed = localStorage.getItem("sidebar_collapsed") === "true";
   if (isCollapsed) {
+    if (sidebar) sidebar.classList.add("collapsed");
     document.body.classList.add("sidebar-collapsed");
   }
 
   btn.addEventListener("click", () => {
+    if (sidebar) sidebar.classList.toggle("collapsed");
     document.body.classList.toggle("sidebar-collapsed");
-    const collapsedNow = document.body.classList.contains("sidebar-collapsed");
+    const collapsedNow = sidebar ? sidebar.classList.contains("collapsed") : document.body.classList.contains("sidebar-collapsed");
     localStorage.setItem("sidebar_collapsed", String(collapsedNow));
     showToast("info", "Sidebar", collapsedNow ? "Sidebar collapsed for extra canvas width" : "Sidebar expanded", 1200);
   });
@@ -1285,6 +1518,48 @@ async function checkActivePollStateOnLoad() {
   } catch {}
 }
 
+async function deleteExpiredCodesHandler() {
+  const game = currentGameFilter;
+  const gameLabel = game === "all" ? "SEMUA game" : `game ${game.toUpperCase()}`;
+
+  let expiredCount = 0;
+  try {
+    const res = await fetch(`/api/public/codes?status=expired&game=${game === "all" ? "" : game}&limit=1`);
+    if (res.ok) {
+      const data = await res.json();
+      expiredCount = data.pagination?.total || 0;
+    }
+  } catch {}
+
+  if (expiredCount === 0) {
+    showToast("info", "No Expired Codes", `Tidak ada kode status EXPIRED untuk ${gameLabel}.`);
+    return;
+  }
+
+  if (!confirm(`Apakah Anda yakin ingin menghapus ${expiredCount} kode status EXPIRED untuk ${gameLabel}?\nTindakan ini tidak dapat dibatalkan.`)) {
+    return;
+  }
+
+  setProgressBar("start");
+  try {
+    const res = await fetch(`/api/config/codes/expired?game=${game}`, {
+      method: "DELETE"
+    });
+    if (res.ok) {
+      const data = await res.json();
+      showToast("success", "Deleted Expired Codes", `Berhasil menghapus ${data.deleted || 0} kode expired (${gameLabel}).`);
+      loadCodesFeed();
+      loadCodeCounts();
+    } else {
+      showToast("error", "Delete Failed", "Gagal menghapus kode expired.");
+    }
+  } catch (err) {
+    showToast("error", "Error", err.message);
+  } finally {
+    setProgressBar("stop");
+  }
+}
+
 // Initial Run
 document.addEventListener('DOMContentLoaded', () => {
   console.log('Dashboard initialized with event handlers');
@@ -1298,5 +1573,7 @@ document.addEventListener('DOMContentLoaded', () => {
   checkActivePollStateOnLoad();
   
   document.getElementById("btnCopyAllActive")?.addEventListener("click", copyAllActiveCodes);
+  document.getElementById("btnDeleteExpired")?.addEventListener("click", deleteExpiredCodesHandler);
 });
+
 

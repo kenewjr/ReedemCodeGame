@@ -1,6 +1,6 @@
 {
   "name": "redeem-relay",
-  "version": "2.4.1",
+  "version": "3.2.0",
   "description": "Multi-game redeem code aggregator with SQLite deduplication and Discord webhook notifications",
   "main": "server.js",
   "type": "module",

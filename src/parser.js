@@ -14,6 +14,18 @@ export function trimDuplicateCode(str) {
   return s;
 }
 
+// Helper: Clean quotes, wikitext syntax, braces and punctuation from raw code strings
+export function cleanCodeString(str) {
+  if (!str || typeof str !== "string") return "";
+  let s = str.trim();
+  s = s.replace(/['"`{}<>\[\]]/g, "").trim();
+  s = s.replace(/^[^a-zA-Z0-9]+|[^a-zA-Z0-9]+$/g, "").trim();
+  if (/^code\s*row/i.test(s) || /header|footer/i.test(s) || /^notacode/i.test(s)) {
+    return "";
+  }
+  return trimDuplicateCode(s.toUpperCase());
+}
+
 // Helper: Parse and normalize raw expiration date strings into YYYY-MM-DD format
 export function parseExpiryDate(str) {
   if (!str || typeof str !== "string") return null;
@@ -66,11 +78,10 @@ export function parseHoyoCodesJson(game, json, sourceUrl) {
     let rawCode = (item.code || "").trim();
     if (!rawCode) continue;
 
-    const rawCodes = rawCode.split(";").map(c => c.trim()).filter(Boolean);
+    const rawCodes = rawCode.split(/[;,/\n\r]+/).map(c => cleanCodeString(c)).filter(Boolean);
 
-    for (const c of rawCodes) {
-      const code = trimDuplicateCode(c.toUpperCase());
-      if (code.length < 5 || code.length > 30) continue;
+    for (const code of rawCodes) {
+      if (code.length < 4 || code.length > 30) continue;
 
       results.push({
         game,
@@ -130,16 +141,16 @@ export function parseFandomWikitext(game, wikitext, sourceUrl) {
       if (trimmedLine.includes("<!--active-->")) currentStatus = "active";
       if (trimmedLine.includes("<!--expired-->")) currentStatus = "expired";
 
-      if (trimmedLine.includes("{{Redemption Code Row")) {
+      if (/^\s*\{\{Redemption Code Row/i.test(trimmedLine) && !/\{\{Redemption Code Row\/(header|footer)/i.test(trimmedLine)) {
         const cleanContent = trimmedLine
           .replace(/^\s*\{\{Redemption Code Row\|/i, "")
           .replace(/\}\}\s*$/, "")
           .trim();
 
         const parts = splitWikitextRow(cleanContent);
-        let rawCode = parts[0]?.trim();
-        if (rawCode && rawCode !== "code" && !rawCode.startsWith("notacode=") && !rawCode.startsWith("{{")) {
-          const code = trimDuplicateCode(rawCode.toUpperCase());
+        let rawCode = cleanCodeString(parts[0]);
+        if (rawCode && rawCode !== "CODE" && rawCode.length >= 4) {
+          const code = rawCode;
           let server = "All";
           let rewards = "";
           let expires = "";
@@ -196,7 +207,7 @@ export function parseFandomWikitext(game, wikitext, sourceUrl) {
         currentStatus = "expired";
       }
 
-      if (trimmedLine.includes("{{Code Row")) {
+      if (/^\s*\{\{Code Row\s*\|/i.test(trimmedLine) && !/\{\{Code Row\/(header|footer)/i.test(trimmedLine)) {
         const cleanContent = trimmedLine
           .replace(/^\s*\{\{Code Row\s*\|/i, "")
           .replace(/\}\}\s*$/, "")
@@ -204,11 +215,10 @@ export function parseFandomWikitext(game, wikitext, sourceUrl) {
 
         const parts = splitWikitextRow(cleanContent);
         const rawCodeStr = parts[0]?.trim();
-        if (rawCodeStr && rawCodeStr !== "code" && !rawCodeStr.includes("WA8MJCETGXLR")) {
-          const rawCodes = rawCodeStr.split(";").map(c => c.trim()).filter(Boolean);
-          for (const rawCode of rawCodes) {
-            const code = trimDuplicateCode(rawCode.toUpperCase());
-            if (code.length < 5 || code.length > 30) continue;
+        if (rawCodeStr && !rawCodeStr.includes("WA8MJCETGXLR")) {
+          const rawCodes = rawCodeStr.split(/[;,/\n\r]+/).map(c => cleanCodeString(c)).filter(Boolean);
+          for (const code of rawCodes) {
+            if (code.length < 4 || code.length > 30 || code === "CODE") continue;
 
             let server = parts[1]?.trim() || "G";
             let rewards = (parts[2] || "").replace(/\{\{Item List\|([^}]+)\}\}/g, "$1").replace(/\|/g, ", ").trim();
@@ -257,7 +267,8 @@ export function parseFandomWikitext(game, wikitext, sourceUrl) {
 
       const codeMatch = line.match(/\|<code>([^<]+)<\/code>/i);
       if (codeMatch) {
-        const code = trimDuplicateCode(codeMatch[1].trim().toUpperCase());
+        const code = cleanCodeString(codeMatch[1]);
+        if (code.length < 4 || code.length > 30) continue;
         let rewards = "";
         let expires = "";
 
@@ -309,57 +320,61 @@ export function parseHtmlCheerio(game, html, sourceUrl) {
     const text = $(el).text().trim();
     if (!text) return;
 
-    const match = text.match(/\b([A-Z0-9]{5,30})\b/);
-    if (!match) return;
+    // Split text by delimiters to handle multiple codes per cell (e.g. "CODE1; CODE2")
+    const segments = text.split(/[\s;,/\n\r\t]+/).filter(Boolean);
+    for (const seg of segments) {
+      const match = seg.match(/\b([A-Z0-9]{4,30})\b/i);
+      if (!match) continue;
 
-    const rawCandidate = match[1];
-    if (nonCodes.has(rawCandidate)) return;
-    if (!/[0-9]/.test(rawCandidate) || !/[A-Z]/.test(rawCandidate)) return;
+      const rawCandidate = cleanCodeString(match[1]);
+      if (!rawCandidate || rawCandidate.length < 4 || nonCodes.has(rawCandidate)) continue;
+      if (!/[0-9]/.test(rawCandidate) || !/[A-Z]/.test(rawCandidate)) continue;
 
-    const code = trimDuplicateCode(rawCandidate);
+      const code = rawCandidate;
 
-    // Walk up parent container & check preceding headings for section context
-    const container = $(el).closest("table, ul, ol, section, div, article");
-    const containerText = container.text() || "";
-    
-    // Check preceding headings (h1..h6) before container
-    const prevHeadings = container.prevAll("h1, h2, h3, h4, h5, h6").text() || $(el).parents().prevAll("h1, h2, h3, h4, h5, h6").text() || "";
-    const contextText = (prevHeadings + " " + containerText).slice(0, 800);
+      // Walk up parent container & check preceding headings for section context
+      const container = $(el).closest("table, ul, ol, section, div, article");
+      const containerText = container.text() || "";
+      
+      // Check preceding headings (h1..h6) before container
+      const prevHeadings = container.prevAll("h1, h2, h3, h4, h5, h6").text() || $(el).parents().prevAll("h1, h2, h3, h4, h5, h6").text() || "";
+      const contextText = (prevHeadings + " " + containerText).slice(0, 800);
 
-    let status = "unconfirmed";
-    const isExpired = /expired|old codes|out of date|no longer work/i.test(contextText);
-    const isActive = /active|working|live codes|latest codes/i.test(contextText);
+      let status = "unconfirmed";
+      const isExpired = /expired|old codes|out of date|no longer work/i.test(contextText);
+      const isActive = /active|working|live codes|latest codes/i.test(contextText);
 
-    if (isExpired && !isActive) {
-      status = "expired";
-    } else if (isActive) {
-      status = "active";
-    }
-
-    const codeType = detectCodeType(code, contextText);
-
-    // Extract rewards near element if inside <tr> or <li>
-    let rewards = "";
-    const tr = $(el).closest("tr");
-    if (tr.length) {
-      const tds = tr.find("td").map((_, td) => $(td).text().replace(/\s+/g, " ").trim()).get();
-      if (tds.length >= 2) {
-        rewards = tds.filter(t => t !== code && !t.includes(code)).join(", ").slice(0, 150).replace(/\s+/g, " ").trim();
+      if (isExpired && !isActive) {
+        status = "expired";
+      } else if (isActive) {
+        status = "active";
       }
-    }
 
-    results.push({
-      game,
-      code,
-      status,
-      codeType,
-      server: "All",
-      rewards,
-      expires: "",
-      discovered: new Date().toISOString().split("T")[0],
-      notes: `Extracted from ${new URL(sourceUrl).hostname}`,
-      sources: [sourceUrl]
-    });
+      const codeType = detectCodeType(code, contextText);
+
+      // Extract rewards near element if inside <tr> or <li>
+      let rewards = "";
+      const tr = $(el).closest("tr");
+      if (tr.length) {
+        const tds = tr.find("td").map((_, td) => $(td).text().replace(/\s+/g, " ").trim()).get();
+        if (tds.length >= 2) {
+          rewards = tds.filter(t => t !== code && !t.includes(code)).join(", ").slice(0, 150).replace(/\s+/g, " ").trim();
+        }
+      }
+
+      results.push({
+        game,
+        code,
+        status,
+        codeType,
+        server: "All",
+        rewards,
+        expires: "",
+        discovered: new Date().toISOString().split("T")[0],
+        notes: `Extracted from ${new URL(sourceUrl).hostname}`,
+        sources: [sourceUrl]
+      });
+    }
   });
 
   // Deduplicate candidates extracted from the same page

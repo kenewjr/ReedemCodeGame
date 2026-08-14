@@ -16,16 +16,17 @@
 
 ## Features
 
-- **Multi-source scraping** with auto-deduplication (SQLite)
+- **Multi-source scraping** with auto-deduplication & wikitext sanitization (SQLite)
 - **Anti-bot bypass** — dual-tier fetcher: stealth headers + [Camofox](https://github.com/jo-inc/camofox-browser) anti-detect browser fallback
-- **Multi-webhook** — send to many Discord servers/channels simultaneously
+- **Multi-webhook Relay** — send to many Discord servers/channels simultaneously with granular game scoping & external switch toggles
 - **Discord Announcement Auto-Publish** — optional crossposting via Bot Token
 - **Custom templates** — `{{gameName}}`, `{{code}}`, `{{rewards}}`, `{{redeemUrl}}`, `{{tags}}`, etc.
 - **Role/User tagging** — `<@&roleId>` and `<@userId>` per webhook
-- **3-tier code lifecycle** — `unconfirmed` → `active` → `expired` with smart auto-expiry
+- **3-tier code lifecycle** — `unconfirmed` → `active` → `expired` with smart auto-expiry and bulk deletion (`DELETE /api/config/codes/expired`)
+- **Direct Click-to-Copy UX** — one-click code copy on feed table and dashboard stream
 - **Circuit breaker** — backoff on repeatedly failing sources
-- **Web Dashboard** — dark glassmorphism UI with code browser, source health, webhook management
-- **REST API** — public read-only + admin protected endpoints
+- **Modern Web Dashboard (v3.2.0)** — dark glassmorphism UI with dedicated feed tab, source health, webhook manager, and pixel-aligned Quick Push grid
+- **REST API (v3.2.0)** — public read-only + admin protected management endpoints
 - **Docker ready** — side-by-side with Camofox browser container
 
 ## Quick Start

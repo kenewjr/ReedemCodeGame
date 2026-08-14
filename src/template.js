@@ -106,7 +106,7 @@ export function renderDiscordEmbed(data, tags = "") {
     footer: {
       text: `RedeemRelay • Verified by ${data.verified_count || 1} source(s)`
     },
-    timestamp: new Date().toISOString()
+    timestamp: data.first_seen_at || new Date().toISOString()
   };
 
   const result = { embeds: [embed] };
