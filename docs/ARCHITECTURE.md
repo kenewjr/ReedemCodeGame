@@ -62,10 +62,12 @@
 
 ### 2.3 Scraper & Parser Registry (`src/sources.js` & `src/parser.js`)
 - **Registry Pattern**: Declarative scraper definitions for each of the 5 games (`hsr`, `genshin`, `wuwa`, `endfield`, `nte`).
+- **Code Validation Engine (`isValidCode`)**: Pre-filters extracted strings to discard quantity multipliers (`X100`, `X4000`), concatenated reward words (`X10000ADVENTURER`), non-code UI artifacts, and brand tokens.
+- **Reward Sanitizer Pipeline (`cleanRewards`)**: Strips embedded code names, action labels (`Copied`, `▶︎ Redeem Code Link`), and dates to prevent description pollution.
 - **Parsers**:
   - `parseHoyoCodesJson`: Directly ingests official HoyoCodes API JSON payloads.
-  - `parseFandomWikitext`: Cleans wikitext markup and extracts tables.
-  - `parseHtmlCheerio`: CSS selector queries for code blocks, tables, and bold tags with context heuristic detection.
+  - `parseFandomWikitext`: Cleans wikitext markup, strips HTML comments, and extracts tables.
+  - `parseHtmlCheerio`: Robust DOM querying extracting codes from clipboard `<input>` fields, `?code=` URL parameters, code tags, and structured list items while isolating rewards to separate cells.
 
 ### 2.4 Discord Webhook Relay (`src/discord.js` & `src/template.js`)
 - Multi-webhook dispatch with configurable payload substitution (`{{gameName}}`, `{{code}}`, `{{rewards}}`, `{{redeemUrl}}`).

@@ -26,7 +26,10 @@ import {
   parseFandomWikitext, 
   parseHtmlCheerio,
   isValidCode,
-  cleanRewards
+  cleanRewards,
+  isInstructionalReward,
+  formatServer,
+  formatExpiry
 } from "./src/parser.js";
 
 import { renderMessage, renderDiscordEmbed, formatTags, formatRewards } from "./src/template.js";
@@ -136,7 +139,7 @@ test("Parser - HoyoCodes JSON API Extractor", () => {
   assert.equal(parsed[2].code, "CODEB");
 });
 
-test("Parser - Fandom Wikitext (Genshin Expired section & WuWa Wikitable)", () => {
+test("Parser - Fandom Wikitext (Genshin Expired section, HSR indefinite expiry, & WuWa Wikitable)", () => {
   const genshinWikitext = `
 ==Active Codes==
 {{Code Row<!--
@@ -157,8 +160,26 @@ test("Parser - Fandom Wikitext (Genshin Expired section & WuWa Wikitable)", () =
   assert.equal(parsedGenshin.length, 2);
   assert.equal(parsedGenshin[0].code, "ACTIVEGENSHIN123");
   assert.equal(parsedGenshin[0].status, "active");
+  assert.equal(parsedGenshin[0].server, "Global");
+  assert.equal(parsedGenshin[0].expires, "2026-08-03 (Expired)");
   assert.equal(parsedGenshin[1].code, "OLDGENSHIN456");
   assert.equal(parsedGenshin[1].status, "expired");
+  assert.equal(parsedGenshin[1].server, "Global");
+  assert.equal(parsedGenshin[1].expires, "2025-01-02 (Expired)");
+
+  const hsrWikitext = `
+<!--active-->
+{{Redemption Code Row|YAJQ2TR6ZY2P|ref=|A|{{Item List|Stellar Jade*100;Refined Aether*4|mode=br}}|2026-08-14|2026-08-15}}
+{{Redemption Code Row|OMEGA|ref=|A|{{Item List|Stellar Jade*60;Fuel*1|mode=br}}|2025-11-07|indef}}
+  `;
+  const parsedHsr = parseFandomWikitext("hsr", hsrWikitext, "https://honkai-star-rail.fandom.com");
+  assert.equal(parsedHsr.length, 2);
+  assert.equal(parsedHsr[0].code, "YAJQ2TR6ZY2P");
+  assert.equal(parsedHsr[0].server, "All");
+  assert.ok(parsedHsr[0].expires.startsWith("2026-08-15"));
+  assert.equal(parsedHsr[1].code, "OMEGA");
+  assert.equal(parsedHsr[1].server, "All");
+  assert.equal(parsedHsr[1].expires, "Permanent");
 
   const wuwaWikitext = `
 ===Active===
@@ -172,6 +193,29 @@ test("Parser - Fandom Wikitext (Genshin Expired section & WuWa Wikitable)", () =
   assert.equal(parsedWuwa.length, 1);
   assert.equal(parsedWuwa[0].code, "WUTHERINGGIFT");
   assert.equal(parsedWuwa[0].rewards, "Astrite*50");
+  assert.equal(parsedWuwa[0].expires, "Unknown");
+});
+
+test("Parser - Server and Expiry Formatting Helpers", () => {
+  // 1. Server formatting
+  assert.equal(formatServer("G"), "Global");
+  assert.equal(formatServer("G<!-- -->"), "Global");
+  assert.equal(formatServer("A"), "All");
+  assert.equal(formatServer("ALL"), "All");
+  assert.equal(formatServer("CN"), "China");
+  assert.equal(formatServer("SEA"), "Southeast Asia");
+  assert.equal(formatServer("SAR"), "TW / HK / MO");
+  assert.equal(formatServer(""), "All");
+
+  // 2. Expiry formatting
+  assert.equal(formatExpiry("indef"), "Permanent");
+  assert.equal(formatExpiry("indefinite"), "Permanent");
+  assert.equal(formatExpiry("indef Code Row/Footer ==Mail== Mail/Reward - Code Redeemed"), "Permanent");
+  assert.equal(formatExpiry("exp"), "Expired");
+  assert.equal(formatExpiry("unknown"), "Unknown");
+  assert.equal(formatExpiry("2026-08-03<!--\n-->}}\n{{Code Row<!--\n-->"), "2026-08-03 (Expired)");
+  assert.equal(formatExpiry("2099/12/31"), "2099-12-31");
+  assert.equal(formatExpiry("December 31, 2099 08:59 (PT)"), "2099-12-31");
 });
 
 test("Parser - Cheerio Selector HTML Extractor", () => {
@@ -550,24 +594,69 @@ test("Parser & Template - Anti-Code Pollution & Quantity Multiplier Rejection", 
   assert.equal(isValidCode("COPIED"), false);
   assert.equal(isValidCode("REDEEM"), false);
 
-  // 2. Real codes accepted
+  // 2. Reject multi-word / spaced strings (tutorial labels)
+  assert.equal(isValidCode("GENSHIN IMPACT"), false);
+  assert.equal(isValidCode("COGWHEEL BUTTON"), false);
+  assert.equal(isValidCode("DAILY COMMISSIONS"), false);
+  assert.equal(isValidCode("THREE DOTS"), false);
+  assert.equal(isValidCode("REDEMPTION CODE"), false);
+  assert.equal(isValidCode("WAKING OF THE WORLD PACK"), false);
+  assert.equal(isValidCode("PART 1"), false);
+
+  // 3. Reject guide vocabulary and character names from guide tables
+  assert.equal(isValidCode("TIPS"), false);
+  assert.equal(isValidCode("CAVERNS"), false);
+  assert.equal(isValidCode("TIER"), false);
+  assert.equal(isValidCode("SIMULATED"), false);
+  assert.equal(isValidCode("APOCALYPTIC"), false);
+  assert.equal(isValidCode("CURRENCY"), false);
+  assert.equal(isValidCode("CHESTS"), false);
+  assert.equal(isValidCode("QUESTS"), false);
+  assert.equal(isValidCode("SHRINES"), false);
+  assert.equal(isValidCode("WORSHIP STATUES"), false);
+  assert.equal(isValidCode("HIMEKO"), false);
+  assert.equal(isValidCode("AVENTURINE"), false);
+  assert.equal(isValidCode("ROBIN"), false);
+  assert.equal(isValidCode("TRAILBLAZER"), false);
+  assert.equal(isValidCode("CAMELLYA"), false);
+  assert.equal(isValidCode("JINHSI"), false);
+  assert.equal(isValidCode("CHANGLI"), false);
+  assert.equal(isValidCode("JIYAN"), false);
+  assert.equal(isValidCode("ROVER"), false);
+  assert.equal(isValidCode("BLADE"), false);
+  assert.equal(isValidCode("RELEASE"), false);
+  assert.equal(isValidCode("MAINTENANCE"), false);
+  assert.equal(isValidCode("DOWNLOAD"), false);
+  assert.equal(isValidCode("UMAMUSUME"), false);
+  assert.equal(isValidCode("YU-GI"), false);
+
+  // 4. Real codes accepted
   assert.equal(isValidCode("ZA9674JSAUPF"), true);
   assert.equal(isValidCode("GENSHIN51YT"), true);
   assert.equal(isValidCode("NTE0429"), true);
   assert.equal(isValidCode("STARRAILFATE2026"), true);
   assert.equal(isValidCode("WUTHERINGGIFT"), true);
+  assert.equal(isValidCode("BURNINGSUN"), true);
+  assert.equal(isValidCode("F5F4D3B2A2"), true);
 
-  // 3. cleanRewards strips code itself and UI text
+  // 5. isInstructionalReward tests
+  assert.equal(isInstructionalReward("Click on the icon on the left-hand top corner of the screen."), true);
+  assert.equal(isInstructionalReward("Open the menu and press the on the left side of the screen."), true);
+  assert.equal(isInstructionalReward("If you’re travelling across the world and come across any, be sure to open them!"), true);
+  assert.equal(isInstructionalReward("Stellar Jade x100, Credit x50,000"), false);
+  assert.equal(isInstructionalReward("160 Primogems, 20,000 Mora, 3 Hero's Wit"), false);
+
+  // 6. cleanRewards strips code itself and UI text
   const dirtyRewards = "GENSHIN51YT, Copied ▶︎ Redeem Code Link, Brilliant Chrysanthemum x5, Mora x30000, Date Added: 08/13";
   const cleaned = cleanRewards(dirtyRewards, "GENSHIN51YT");
   assert.equal(cleaned, "Brilliant Chrysanthemum x5, Mora x30000");
 
-  // 4. formatRewards strips code itself and handles asterisks
+  // 7. formatRewards strips code itself and handles asterisks
   const formatted = formatRewards("ZA9674JSAUPF, Stellar Jade*100, Credit*50000", "ZA9674JSAUPF");
   assert.equal(formatted, "Stellar Jade ×100, Credit ×50000");
   assert.ok(!formatted.includes("ZA9674JSAUPF"));
 
-  // 5. renderDiscordEmbed excludes code from Rewards field
+  // 8. renderDiscordEmbed excludes code from Rewards field
   const embed = renderDiscordEmbed({
     game: "genshin",
     code: "GENSHIN51YT",
@@ -609,6 +698,45 @@ test("Parser - Cheerio HTML Table with Clipboard Input & Multipliers", () => {
   assert.ok(!parsed[0].rewards.includes("ZA9674JSAUPF"));
   assert.ok(!parsed[0].rewards.includes("Copied"));
   assert.ok(parsed[0].rewards.includes("Stellar Jade x100"));
+});
+
+test("Parser - Cheerio Strictly Rejects How to Redeem and Guide Lists", () => {
+  const guideHtml = `
+    <html>
+      <body>
+        <h2>Active Codes</h2>
+        <ul>
+          <li><code>REALCODE2026</code> - 100 Stellar Jade</li>
+        </ul>
+
+        <h2>How to Redeem Codes</h2>
+        <ol>
+          <li><strong>Phone</strong> - Click on the icon on the left-hand top corner.</li>
+          <li><strong>Three Dots</strong> - Click on the next to your name.</li>
+          <li><strong>Redemption Code</strong> - Select the option.</li>
+        </ol>
+
+        <h2>Other Ways to Get Primogems</h2>
+        <ul>
+          <li><strong>Chests:</strong> If you're travelling across the world, open them.</li>
+          <li><strong>Quests:</strong> Complete story and event quests.</li>
+          <li><strong>Daily Commissions:</strong> Log in every day.</li>
+        </ul>
+
+        <h2>Character Tier List & Guides</h2>
+        <table>
+          <tr><th>Character</th><th>Role</th></tr>
+          <tr><td>Himeko</td><td>Nova Banner</td></tr>
+          <tr><td>Aventurine</td><td>Waveflair</td></tr>
+        </table>
+      </body>
+    </html>
+  `;
+
+  const parsed = parseHtmlCheerio("hsr", guideHtml, "https://example.com/codes");
+  assert.equal(parsed.length, 1);
+  assert.equal(parsed[0].code, "REALCODE2026");
+  assert.equal(parsed[0].rewards, "100 Stellar Jade");
 });
 
 // Auto-cleanup test database and remove all dummy test codes

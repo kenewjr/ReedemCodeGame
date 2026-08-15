@@ -1,7 +1,7 @@
 import { createClient } from "@libsql/client";
 import fs from "node:fs";
 import path from "node:path";
-import { parseExpiryDate, cleanCodeString, isValidCode, cleanRewards } from "./parser.js";
+import { parseExpiryDate, cleanCodeString, isValidCode, cleanRewards, isInstructionalReward, NON_CODES, formatServer, formatExpiry } from "./parser.js";
 import { SOURCES } from "./sources.js";
 
 const DATA_DIR = path.resolve("data");
@@ -121,7 +121,7 @@ export async function initDb() {
     );
   `);
 
-  // Cleanup test artifacts and corrupted codes from production DB if present
+  // Cleanup test artifacts, junk guide words, and corrupted codes from production DB if present
   if (!process.env.TEST_DB_PATH) {
     await db.execute(`
       DELETE FROM codes 
@@ -129,13 +129,42 @@ export async function initDb() {
          OR code LIKE 'TESTCODE_%' 
          OR code LIKE 'PAG_%' 
          OR code LIKE 'EXP_%'
+         OR code LIKE '% %'
          OR code GLOB 'X[0-9]*' 
          OR code GLOB '[0-9]*X' 
          OR code GLOB 'X[0-9]*[A-Z]*' 
          OR code GLOB '[0-9][0-9][0-9]*[A-Z]*'
-         OR code IN ('code', 'CODE', 'VG247', 'LS500', '13TH', '000NL', 'NOTACode', 'NOTIFIED OF ANY UPDATES', 'ALL ENDFIELD CODES', 'DAILY', 'EVENTS', 'BladeFitCheck', 'SitByEvanescia')
          OR LENGTH(code) < 4
+         OR LENGTH(code) > 30
+         OR rewards LIKE '%Click on%'
+         OR rewards LIKE '%Open the%'
+         OR rewards LIKE '%Go into%'
+         OR rewards LIKE '%Run on your%'
+         OR rewards LIKE '%If you%re travelling%'
+         OR rewards LIKE '%Walkthrough%'
+         OR rewards LIKE '%Rerun Banner%'
+         OR rewards LIKE '%Available Platforms%'
+         OR rewards LIKE '%System Requirements%'
     `);
+
+    // Purge any codes matching NON_CODES or failing isValidCode/isInstructionalReward
+    try {
+      const allDbCodes = await db.execute("SELECT game, code, rewards FROM codes");
+      for (const row of allDbCodes.rows) {
+        const c = String(row.code).trim().toUpperCase();
+        if (!isValidCode(c) || isInstructionalReward(String(row.rewards || ""))) {
+          await db.execute({
+            sql: "DELETE FROM codes WHERE game = ? AND code = ?",
+            args: [String(row.game), String(row.code)]
+          });
+          await db.execute({
+            sql: "DELETE FROM deliveries WHERE game = ? AND code = ?",
+            args: [String(row.game), String(row.code)]
+          });
+        }
+      }
+    } catch {}
+
     await db.execute(`
       DELETE FROM source_health 
       WHERE id LIKE 'failing-source-test%'
@@ -155,6 +184,26 @@ export async function initDb() {
           await db.execute({
             sql: "UPDATE codes SET rewards = ? WHERE game = ? AND code = ?",
             args: [cleaned, String(row.game), String(row.code)]
+          });
+        }
+      }
+    } catch {}
+
+    // Clean any server and expires_at containing wikitext artifacts or raw codes
+    try {
+      const allDbRows = await db.execute("SELECT game, code, server, expires_at FROM codes");
+      for (const row of allDbRows.rows) {
+        const srv = formatServer(String(row.server || ""));
+        const rawExp = String(row.expires_at || "");
+        let cleanExp = rawExp;
+        if (/indef/i.test(rawExp) || rawExp.includes("<!--") || rawExp.includes("}}")) {
+          const parsed = parseExpiryDate(rawExp);
+          cleanExp = parsed || (/indef/i.test(rawExp) ? "Permanent" : "");
+        }
+        if (srv !== row.server || cleanExp !== row.expires_at) {
+          await db.execute({
+            sql: "UPDATE codes SET server = ?, expires_at = ? WHERE game = ? AND code = ?",
+            args: [srv, cleanExp, String(row.game), String(row.code)]
           });
         }
       }
@@ -360,9 +409,13 @@ export async function saveCodeCandidate(candidate) {
   if (!rawCode || !isValidCode(rawCode)) {
     return { record: null, eventType: null };
   }
+  if (isInstructionalReward(candidate.rewards)) {
+    return { record: null, eventType: null };
+  }
   candidate.code = rawCode;
   const cleanedRewards = cleanRewards(candidate.rewards || "", candidate.code);
   candidate.rewards = cleanedRewards;
+  candidate.server = formatServer(candidate.server);
 
   const now = new Date();
   const nowIso = now.toISOString();
@@ -388,15 +441,15 @@ export async function saveCodeCandidate(candidate) {
     computedStatus = "expired";
   }
 
-  // Write-time validation: Ensure expires_at matches YYYY-MM-DD format or is empty
+  // Write-time validation: Ensure expires_at matches YYYY-MM-DD or 'Permanent' or is empty
   let finalExpiresAt = isoParsedExpiry || "";
   if (!finalExpiresAt && rawExpires) {
-    const trimmed = String(rawExpires).trim();
-    if (/^\d{4}-\d{2}-\d{2}$/.test(trimmed)) {
-      finalExpiresAt = trimmed;
+    const formatted = formatExpiry(rawExpires);
+    if (formatted === "Permanent" || /^\d{4}-\d{2}-\d{2}$/.test(formatted)) {
+      finalExpiresAt = formatted;
     }
   }
-  if (finalExpiresAt && !/^\d{4}-\d{2}-\d{2}$/.test(finalExpiresAt)) {
+  if (finalExpiresAt && finalExpiresAt !== "Permanent" && !/^\d{4}-\d{2}-\d{2}$/.test(finalExpiresAt)) {
     finalExpiresAt = "";
   }
 
@@ -448,9 +501,9 @@ export async function saveCodeCandidate(candidate) {
 
     // Smart Metadata Enrichment (Never overwrite valid data with empty strings)
     const updatedCodeType = (candidate.codeType && candidate.codeType !== "redeem") ? candidate.codeType : String(existing.code_type || "redeem");
-    const updatedServer = (candidate.server && candidate.server !== "All") ? candidate.server : String(existing.server || "All");
+    const updatedServer = (candidate.server && candidate.server !== "All") ? formatServer(candidate.server) : formatServer(String(existing.server || "All"));
     const updatedRewards = (candidate.rewards && String(candidate.rewards).trim() !== "") ? candidate.rewards : String(existing.rewards || "");
-    const existingExpiresClean = (existing && /^\d{4}-\d{2}-\d{2}$/.test(String(existing.expires_at || ""))) ? String(existing.expires_at) : "";
+    const existingExpiresClean = (existing && (/^\d{4}-\d{2}-\d{2}$/.test(String(existing.expires_at || "")) || String(existing.expires_at) === "Permanent")) ? String(existing.expires_at) : "";
     const updatedExpires = finalExpiresAt || existingExpiresClean;
     const updatedDiscovered = (candidate.discovered && String(candidate.discovered).trim() !== "") ? candidate.discovered : String(existing.discovered_at || "");
 

@@ -1,4 +1,5 @@
 import { getGameMeta } from "./games/registry.js";
+import { formatServer, formatExpiry } from "./parser.js";
 
 export function formatRewards(rawRewards, code = "") {
   if (!rawRewards || !String(rawRewards).trim()) return "N/A";
@@ -56,6 +57,8 @@ export function renderMessage(template, data, tags = "") {
 
   const hypertextLink = fullRedeemUrl ? `[click here](${fullRedeemUrl})` : "N/A";
   const formattedRewards = formatRewards(data.rewards, data.code);
+  const serverStr = formatServer(data.server);
+  const expiryStr = formatExpiry(data.expires || data.expires_at, data.status);
 
   let msg = template || "";
   msg = msg.replaceAll("{{game}}", data.game || "");
@@ -63,9 +66,9 @@ export function renderMessage(template, data, tags = "") {
   msg = msg.replaceAll("{{code}}", data.code || "");
   msg = msg.replaceAll("{{status}}", data.status || "unconfirmed");
   msg = msg.replaceAll("{{codeType}}", data.code_type || data.codeType || "redeem");
-  msg = msg.replaceAll("{{server}}", data.server || "All");
+  msg = msg.replaceAll("{{server}}", serverStr);
   msg = msg.replaceAll("{{rewards}}", formattedRewards);
-  msg = msg.replaceAll("{{expires}}", data.expires || data.expires_at || "Unknown");
+  msg = msg.replaceAll("{{expires}}", expiryStr);
   msg = msg.replaceAll("{{notes}}", data.notes || "");
   msg = msg.replaceAll("{{redeemLink}}", hypertextLink);
   
@@ -108,13 +111,15 @@ export function renderDiscordEmbed(data, tags = "") {
   }
 
   const formattedRewards = formatRewards(data.rewards, data.code);
+  const serverStr = formatServer(data.server);
+  const expiryStr = formatExpiry(data.expires || data.expires_at, data.status);
 
   const fields = [
     { name: "Code", value: `\`${data.code}\``, inline: true },
     { name: "Type", value: String(data.code_type || data.codeType || "redeem").toUpperCase(), inline: true },
-    { name: "Server", value: data.server || "All", inline: true },
+    { name: "Server", value: serverStr, inline: true },
     { name: "Rewards", value: formattedRewards || "N/A", inline: false },
-    { name: "Expiry", value: data.expires || data.expires_at || "Unknown", inline: true }
+    { name: "Expiry", value: expiryStr, inline: true }
   ];
 
   // Note: Only include Redeem Link if game has web redemption!

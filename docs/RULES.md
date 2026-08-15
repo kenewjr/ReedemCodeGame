@@ -33,6 +33,8 @@ When refactoring or updating `public/index.html` or `public/style.css`:
 1. **Tier 1 First, Tier 2 Fallback**: Scrapers must attempt fast native HTTP fetch first. Camofox (`http://camofox:9377`) should only be invoked upon HTTP 403 or 429 Cloudflare challenges.
 2. **Circuit Breaker**: If a scraper fails 5 consecutive times, set `circuit_breaker_active = 1` and pause requests to that source to prevent IP bans.
 3. **Empty-Scrape Protection**: If a scraper returns 0 codes, log a warning and do not purge existing active codes from database.
+4. **Strict Code Validation (`isValidCode`)**: Every scraped candidate code MUST pass `isValidCode()` validation. Quantity multipliers (`X100`, `X120`, `X4000`, `100X`), concatenated item strings (`X10000ADVENTURER`, `X30000HERO`), number-suffix tokens (`000NL`, `13TH`), and UI/site names (`VG247`, `COPIED`, `REDEEM`) must be rejected immediately.
+5. **Reward Anti-Pollution (`cleanRewards`)**: Rewards text must be sanitized to strip any instance of the code itself, UI action tokens (`Copied`, `▶︎ Redeem Code Link`), and date strings to prevent cross-contamination.
 
 ---
 

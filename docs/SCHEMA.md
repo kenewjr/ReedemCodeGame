@@ -15,7 +15,7 @@ Stores redeem code records collected across all sources and games.
 | `code_type` | TEXT | DEFAULT 'redeem' | Category: `redeem`, `anniversary`, `livestream`, `patch` |
 | `status` | TEXT | DEFAULT 'unconfirmed'| Lifecycle: `active`, `unconfirmed`, `expired` |
 | `server` | TEXT | DEFAULT 'All' | Target game server region |
-| `rewards` | TEXT | NULL | In-game item rewards text (e.g. `Stellar Jade*100`) |
+| `rewards` | TEXT | NULL | Sanitized in-game item rewards text (e.g. `Stellar Jade ×100, Credit ×50,000`, code string excluded) |
 | `first_seen_at` | TEXT | NOT NULL | ISO timestamp when first saved in system DB |
 | `discovered_at` | TEXT | NULL | Original discovery timestamp from source |
 | `expires_at` | TEXT | NULL | Expiration timestamp or date text |

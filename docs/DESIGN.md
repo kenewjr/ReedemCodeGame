@@ -63,8 +63,8 @@ RedeemRelay utilizes a **Modern Dark Glassmorphism** design system focused on hi
 - Skeleton shimmer animation (`.skeleton-bar`) during data fetching.
 - Game filter pills and status filter pills with pill active state and glow.
 - **Click-to-Copy Code Chips (`.code-clickable`)**:
-  - Interactive chip with hover glow, cursor pointer, and instant copy trigger `copyToClipboard(code)` on click.
-  - Eliminates small icon buttons for enhanced mobile accessibility.
+  - Interactive clean text chip with hover glow, cursor pointer, and instant copy trigger `copyToClipboard(code)` on click.
+  - Oromits redundant clipboard icons to maximize clean visual typography and readability.
 
 #### Quick Push & Force Broadcast Structured Grid
 - **Unified 3-Column Grid (`.form-grid-push`)**:

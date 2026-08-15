@@ -29,6 +29,10 @@
   - `unconfirmed`: Newly discovered code requiring confirmation.
   - `expired`: Code confirmed inactive or auto-cleaned.
 - **Categorization**: `redeem`, `anniversary`, `livestream`, `patch`.
+- **Strict Code Validation & Anti-Pollution**:
+  - Reject quantity multipliers (`X100`, `X120`, `X4000`, `100X`), concatenated item words (`X10000ADVENTURER`, `X30000HERO`), and UI tokens.
+  - Separate code from reward cells in HTML tables (supports clipboard `<input>` tags, `?code=` query parameters).
+  - Automatically strip the code itself, UI button labels (`Copied`, `▶︎ Redeem Code Link`), and dates from reward descriptions.
 - **Deduplication & Sanitization**: Strict normalize-and-hash matching in SQLite database, wikitext comment/quote stripping, and delimited multi-code cell splitting.
 - **Auto-Expiry Cleanup**: Lifecycle pipeline to auto-expire stale or past-date codes.
 - **Manual Code Control & Bulk Cleanup**: Instant manual status mutation (`/api/code-status`) and bulk delete expired codes per-game or globally (`DELETE /api/config/codes/expired`).
@@ -44,7 +48,7 @@
 - **DaisyUI v4 + Tailwind CSS Dark Glassmorphism Theme**.
 - **Collapsible Sidebar**: Compact icon-only view toggleable on desktop & mobile drawer.
 - **Dedicated Redeem Codes Feed Tab (`#codesTab`)**: Full-screen table view with quick actions (Copy Active Codes, Delete Expired Codes) and column sorting.
-- **Direct Click-to-Copy UX**: Click on any code cell chip (`.code-clickable`) to copy code directly to clipboard.
+- **Direct Click-to-Copy UX**: Click on any code cell chip (`.code-clickable`) to copy code directly to clipboard (clean chip without redundant icon).
 - **Dashboard Hub Matrix & Activity Stream**: Real-time 5-game status matrix and recent code stream.
 - **Unified Quick Push & Force Broadcast Form Grid**: Pixel-aligned 3-column input layout with formal sub-labels.
 - **Streamlined Multi-Webhook Accordion**: Direct header switch toggle without opening collapse, compact form padding.
