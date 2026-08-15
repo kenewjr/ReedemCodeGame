@@ -1,5 +1,46 @@
 import * as cheerio from "cheerio";
 
+export const NON_CODES = new Set([
+  "HONKAI", "GENSHIN", "STARRAIL", "WUTHERING", "WAVES", "IMPACT", "REDEMPTION",
+  "EXPIRED", "ACTIVE", "DISCORD", "TWITTER", "YOUTUBE", "HOYOVERSE", "KUROGAMES",
+  "PRIMOGEMS", "ASTRITE", "STELLAR", "CREDITS", "JANUARY", "FEBRUARY", "MARCH",
+  "APRIL", "MAY", "JUNE", "JULY", "AUGUST", "SEPTEMBER", "OCTOBER", "NOVEMBER", "DECEMBER",
+  "GUIDES", "POCKET", "TACTICS", "GAMESN", "GAME8", "DESTRUCTOID", "ARTICLE", "PRIVACY",
+  "COOKIES", "TERMS", "RIGHTS", "RESERVED", "COPYRIGHT", "ARKNIGHTS", "ENDFIELD",
+  "NEVERNESS", "EVERNESS", "SEARCH", "MENU", "LOGIN", "SIGNUP", "REGISTER", "SUBMIT",
+  "COPIED", "REDEEM", "CODES", "CODE", "HERE", "LINK", "FREE", "REWARDS", "REWARD",
+  "TABLE", "LIST", "UPDATE", "UPDATED", "VERSION", "PATCH", "SERVER", "STATUS",
+  "GLOBAL", "ASIA", "EUROPE", "AMERICA", "TWITCH", "PRIME", "GAMING", "DROPS",
+  "NEWS", "CHARACTERS", "BOSSES", "WARPS", "EVENTS", "ITEMS", "MAPS", "MISSIONS",
+  "VG247", "SILICONERA", "ROCKPAPERSHOTGUN", "DOTGG", "PCGAMER", "GAMESRADAR", "FANDOM"
+]);
+
+// Helper: Validate if string is a legitimate redeem code and not quantity/UI artifact
+export function isValidCode(raw) {
+  if (!raw || typeof raw !== "string") return false;
+  const s = raw.trim().toUpperCase();
+  if (s.length < 4 || s.length > 35) return false;
+  if (NON_CODES.has(s)) return false;
+
+  // Reject quantity multipliers (e.g. X100, X120, X4000, 100X, etc.)
+  if (/^[X×]\d+$/i.test(s) || /^\d+[X×]$/i.test(s)) return false;
+
+  // Reject quantity multipliers glued to reward words (e.g. X10000ADVENTURER, X30000HERO, X100MORA)
+  if (/^[X×]\d+[A-Z]+$/i.test(s)) return false;
+
+  // Reject numbers with suffixes/prefixes (e.g. 000NL, 13TH, 1ST)
+  if (/^\d{3,}[A-Z]{1,2}$/i.test(s) || /^\d+(ST|ND|RD|TH)$/i.test(s)) return false;
+
+  // Must contain at least one letter
+  if (!/[A-Z]/.test(s)) return false;
+
+  // Reject URL prefixes or code row headers
+  if (/^(HTTP|HTTPS|WWW|COM|NET|ORG|HTML)/i.test(s)) return false;
+  if (/^CODE\s*ROW/i.test(s) || /HEADER|FOOTER|NOTACODE/i.test(s)) return false;
+
+  return true;
+}
+
 // Helper: Trim concatenated duplicate code (e.g. "NTEFUNGAMENTEFUNGAME" -> "NTEFUNGAME")
 export function trimDuplicateCode(str) {
   if (!str || typeof str !== "string") return str;
@@ -20,10 +61,48 @@ export function cleanCodeString(str) {
   let s = str.trim();
   s = s.replace(/['"`{}<>\[\]]/g, "").trim();
   s = s.replace(/^[^a-zA-Z0-9]+|[^a-zA-Z0-9]+$/g, "").trim();
-  if (/^code\s*row/i.test(s) || /header|footer/i.test(s) || /^notacode/i.test(s)) {
-    return "";
+  const trimmed = trimDuplicateCode(s.toUpperCase());
+  if (!isValidCode(trimmed)) return "";
+  return trimmed;
+}
+
+// Helper: Clean rewards string, removing UI buttons, dates, and the code itself
+export function cleanRewards(rawRewards, code = "") {
+  if (!rawRewards || typeof rawRewards !== "string") return "";
+  let s = rawRewards
+    .replace(/\{\{Item List\|([^}]+)\}\}/g, "$1")
+    .replace(/\|mode=br/g, "")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/[\r\n]+/g, " ");
+
+  // Remove UI button/action artifacts
+  s = s.replace(/\bCopied\b/gi, "")
+       .replace(/▶︎?\s*Redeem\s*(Code)?\s*(Link|Here)?/gi, "")
+       .replace(/\bDate Added:\s*[\d/]+/gi, "")
+       .replace(/\bExpires?:\s*[\d/-]+(\s*(UTC|PT|ET|GMT|JST))?/gi, "")
+       .replace(/\bValid until:\s*[\d/-]+(\s*(UTC|PT|ET|GMT|JST))?/gi, "")
+       .replace(/\b(Expired|Expires)\s+(TBA|Unknown|[\d/]+)/gi, "")
+       .replace(/\(?(New|NEW|new)\)?/g, "")
+       .replace(/https?:\/\/[^\s,]+/g, "");
+
+  // Remove the code itself from rewards if present (case-insensitive word boundary match)
+  if (code && String(code).trim().length >= 4) {
+    const cleanC = String(code).trim();
+    const escapedCode = cleanC.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    s = s.replace(new RegExp(`\\b${escapedCode}\\b`, "gi"), "");
   }
-  return trimDuplicateCode(s.toUpperCase());
+
+  // Normalize delimiters & bullets
+  s = s.replace(/[・•]/g, ", ")
+       .replace(/\s*;\s*/g, ", ")
+       .replace(/\s*\|\s*/g, ", ")
+       .replace(/,{2,}/g, ",")
+       .replace(/^\s*[,:\-–—\s]+/, "")
+       .replace(/[,:\-–—\s]+$/, "")
+       .replace(/\s+/g, " ")
+       .trim();
+
+  return s;
 }
 
 // Helper: Parse and normalize raw expiration date strings into YYYY-MM-DD format
@@ -81,7 +160,9 @@ export function parseHoyoCodesJson(game, json, sourceUrl) {
     const rawCodes = rawCode.split(/[;,/\n\r]+/).map(c => cleanCodeString(c)).filter(Boolean);
 
     for (const code of rawCodes) {
-      if (code.length < 4 || code.length > 30) continue;
+      if (!isValidCode(code)) continue;
+
+      const cleanRew = cleanRewards(item.rewards || "", code);
 
       results.push({
         game,
@@ -89,7 +170,7 @@ export function parseHoyoCodesJson(game, json, sourceUrl) {
         status: item.status === "OK" ? "active" : "unconfirmed",
         codeType: detectCodeType(code, item.rewards || ""),
         server: "All",
-        rewards: (item.rewards || "").replace(/\s+/g, " ").trim(),
+        rewards: cleanRew,
         expires: "",
         discovered: new Date().toISOString().split("T")[0],
         notes: "Sourced from HoyoCodes API",
@@ -149,7 +230,7 @@ export function parseFandomWikitext(game, wikitext, sourceUrl) {
 
         const parts = splitWikitextRow(cleanContent);
         let rawCode = cleanCodeString(parts[0]);
-        if (rawCode && rawCode !== "CODE" && rawCode.length >= 4) {
+        if (rawCode && isValidCode(rawCode)) {
           const code = rawCode;
           let server = "All";
           let rewards = "";
@@ -173,7 +254,6 @@ export function parseFandomWikitext(game, wikitext, sourceUrl) {
             }
           }
 
-          // Pre-validation check: skip if raw wikitext braces remain
           if (rewards.includes("{{") || rewards.includes("}}") || expires.includes("{{") || expires.includes("}}")) {
             continue;
           }
@@ -184,7 +264,7 @@ export function parseFandomWikitext(game, wikitext, sourceUrl) {
             status: currentStatus,
             codeType: detectCodeType(code, rewards + " " + line),
             server,
-            rewards,
+            rewards: cleanRewards(rewards, code),
             expires,
             discovered: "",
             notes: "Fandom HSR Wiki",
@@ -218,7 +298,7 @@ export function parseFandomWikitext(game, wikitext, sourceUrl) {
         if (rawCodeStr && !rawCodeStr.includes("WA8MJCETGXLR")) {
           const rawCodes = rawCodeStr.split(/[;,/\n\r]+/).map(c => cleanCodeString(c)).filter(Boolean);
           for (const code of rawCodes) {
-            if (code.length < 4 || code.length > 30 || code === "CODE") continue;
+            if (!isValidCode(code)) continue;
 
             let server = parts[1]?.trim() || "G";
             let rewards = (parts[2] || "").replace(/\{\{Item List\|([^}]+)\}\}/g, "$1").replace(/\|/g, ", ").trim();
@@ -247,7 +327,7 @@ export function parseFandomWikitext(game, wikitext, sourceUrl) {
               status: currentStatus,
               codeType: detectCodeType(code, rewards),
               server,
-              rewards,
+              rewards: cleanRewards(rewards, code),
               discovered,
               expires,
               notes: "Fandom Genshin Wiki",
@@ -268,7 +348,7 @@ export function parseFandomWikitext(game, wikitext, sourceUrl) {
       const codeMatch = line.match(/\|<code>([^<]+)<\/code>/i);
       if (codeMatch) {
         const code = cleanCodeString(codeMatch[1]);
-        if (code.length < 4 || code.length > 30) continue;
+        if (!isValidCode(code)) continue;
         let rewards = "";
         let expires = "";
 
@@ -286,7 +366,7 @@ export function parseFandomWikitext(game, wikitext, sourceUrl) {
           status: currentStatus,
           codeType: detectCodeType(code, rewards),
           server: "All",
-          rewards,
+          rewards: cleanRewards(rewards, code),
           expires,
           discovered: "",
           notes: "Fandom WuWa Wiki",
@@ -306,75 +386,146 @@ export function parseHtmlCheerio(game, html, sourceUrl) {
 
   const $ = cheerio.load(html);
 
-  const nonCodes = new Set([
-    "HONKAI", "GENSHIN", "STARRAIL", "WUTHERING", "WAVES", "IMPACT", "REDEMPTION",
-    "EXPIRED", "ACTIVE", "DISCORD", "TWITTER", "YOUTUBE", "HOYOVERSE", "KUROGAMES",
-    "PRIMOGEMS", "ASTRITE", "STELLAR", "CREDITS", "JANUARY", "FEBRUARY", "MARCH",
-    "APRIL", "AUGUST", "SEPTEMBER", "OCTOBER", "NOVEMBER", "DECEMBER", "GUIDES",
-    "POCKET", "TACTICS", "GAMESN", "GAME8", "DESTRUCTOID", "ARTICLE", "PRIVACY",
-    "COOKIES", "TERMS", "RIGHTS", "RESERVED", "COPYRIGHT", "ARKNIGHTS", "ENDFIELD",
-    "NEVERNESS", "EVERNESS", "SEARCH", "MENU", "LOGIN", "SIGNUP", "REGISTER", "SUBMIT"
-  ]);
+  // Strategy 1: Table-based extraction
+  $("table").each((_, tbl) => {
+    const container = $(tbl).closest("section, div, article") || $(tbl);
+    const prevHeading = $(tbl).prevAll("h1, h2, h3, h4, h5, h6").first().text() ||
+                        $(tbl).parents().prevAll("h1, h2, h3, h4, h5, h6").first().text() || "";
+    const contextText = (prevHeading + " " + container.text()).slice(0, 1000);
 
-  $("code, strong, b, td").each((_, el) => {
-    const text = $(el).text().trim();
-    if (!text) return;
+    let sectionStatus = "unconfirmed";
+    if (/expired|old codes|out of date|no longer work/i.test(prevHeading || contextText)) {
+      sectionStatus = "expired";
+    } else if (/active|working|live codes|latest codes|new codes/i.test(prevHeading || contextText)) {
+      sectionStatus = "active";
+    }
 
-    // Split text by delimiters to handle multiple codes per cell (e.g. "CODE1; CODE2")
-    const segments = text.split(/[\s;,/\n\r\t]+/).filter(Boolean);
-    for (const seg of segments) {
-      const match = seg.match(/\b([A-Z0-9]{4,30})\b/i);
-      if (!match) continue;
+    $(tbl).find("tr").each((_, tr) => {
+      const tds = $(tr).find("td");
+      if (!tds.length) return; // Header row
 
-      const rawCandidate = cleanCodeString(match[1]);
-      if (!rawCandidate || rawCandidate.length < 4 || nonCodes.has(rawCandidate)) continue;
-      if (!/[0-9]/.test(rawCandidate) || !/[A-Z]/.test(rawCandidate)) continue;
+      let extractedCode = "";
+      let rawRewards = "";
+      let rawExpiry = "";
 
-      const code = rawCandidate;
-
-      // Walk up parent container & check preceding headings for section context
-      const container = $(el).closest("table, ul, ol, section, div, article");
-      const containerText = container.text() || "";
-      
-      // Check preceding headings (h1..h6) before container
-      const prevHeadings = container.prevAll("h1, h2, h3, h4, h5, h6").text() || $(el).parents().prevAll("h1, h2, h3, h4, h5, h6").text() || "";
-      const contextText = (prevHeadings + " " + containerText).slice(0, 800);
-
-      let status = "unconfirmed";
-      const isExpired = /expired|old codes|out of date|no longer work/i.test(contextText);
-      const isActive = /active|working|live codes|latest codes/i.test(contextText);
-
-      if (isExpired && !isActive) {
-        status = "expired";
-      } else if (isActive) {
-        status = "active";
+      // Check <input value="..."> inside table row (Game8 clipboard container)
+      const inputVal = $(tr).find("input[type='text'], input.a-clipboard__textInput").val();
+      if (inputVal && isValidCode(inputVal)) {
+        extractedCode = inputVal.trim().toUpperCase();
       }
 
-      const codeType = detectCodeType(code, contextText);
+      // Check links with ?code=...
+      if (!extractedCode) {
+        $(tr).find("a[href*='code=']").each((_, a) => {
+          const href = $(a).attr("href") || "";
+          const match = href.match(/[?&]code=([A-Za-z0-9_]+)/i);
+          if (match && isValidCode(match[1])) {
+            extractedCode = match[1].trim().toUpperCase();
+          }
+        });
+      }
 
-      // Extract rewards near element if inside <tr> or <li>
-      let rewards = "";
-      const tr = $(el).closest("tr");
-      if (tr.length) {
-        const tds = tr.find("td").map((_, td) => $(td).text().replace(/\s+/g, " ").trim()).get();
-        if (tds.length >= 2) {
-          rewards = tds.filter(t => t !== code && !t.includes(code)).join(", ").slice(0, 150).replace(/\s+/g, " ").trim();
+      // Check <code>, <strong>, <b> in 1st cell
+      if (!extractedCode && tds.length > 0) {
+        const firstTd = $(tds[0]);
+        const codeTag = firstTd.find("code, strong, b").first().text().trim();
+        if (codeTag && isValidCode(codeTag)) {
+          extractedCode = codeTag.toUpperCase();
         }
       }
 
+      // Check first cell text words
+      if (!extractedCode && tds.length > 0) {
+        const firstTdText = $(tds[0]).text().trim();
+        const segments = firstTdText.split(/[\s;,/\n\r\t]+/).filter(Boolean);
+        for (const seg of segments) {
+          const cleaned = seg.replace(/^[^a-zA-Z0-9]+|[^a-zA-Z0-9]+$/g, "");
+          if (isValidCode(cleaned)) {
+            extractedCode = cleaned.toUpperCase();
+            break;
+          }
+        }
+      }
+
+      if (!extractedCode || !isValidCode(extractedCode)) return;
+
+      // Extract rewards from other cells (cell 1 onwards)
+      if (tds.length >= 2) {
+        const rewardCells = [];
+        for (let i = 1; i < tds.length; i++) {
+          const cellText = $(tds[i]).text().replace(/\s+/g, " ").trim();
+          if (cellText) rewardCells.push(cellText);
+        }
+        rawRewards = rewardCells.join(", ");
+      }
+
+      const cleanRew = cleanRewards(rawRewards, extractedCode);
+
       results.push({
         game,
-        code,
-        status,
-        codeType,
+        code: extractedCode,
+        status: sectionStatus,
+        codeType: detectCodeType(extractedCode, contextText),
         server: "All",
-        rewards,
+        rewards: cleanRew,
+        expires: rawExpiry,
+        discovered: new Date().toISOString().split("T")[0],
+        notes: `Extracted from ${new URL(sourceUrl).hostname}`,
+        sources: [sourceUrl]
+      });
+    });
+  });
+
+  // Strategy 2: List-based extraction (ul, ol)
+  $("ul, ol").each((_, list) => {
+    const prevHeading = $(list).prevAll("h1, h2, h3, h4, h5, h6").first().text() ||
+                        $(list).parents().prevAll("h1, h2, h3, h4, h5, h6").first().text() || "";
+    let sectionStatus = "unconfirmed";
+    if (/expired|old codes|out of date|no longer work/i.test(prevHeading)) {
+      sectionStatus = "expired";
+    } else if (/active|working|live codes|latest codes|new codes/i.test(prevHeading)) {
+      sectionStatus = "active";
+    }
+
+    $(list).find("li").each((_, li) => {
+      const liText = $(li).text().replace(/\s+/g, " ").trim();
+      if (!liText || liText.length < 4) return;
+
+      let extractedCode = "";
+      let rawRewards = "";
+
+      // Check <code> or <strong> inside <li>
+      const leadTag = $(li).find("code, strong, b").first().text().trim();
+      if (leadTag && isValidCode(leadTag)) {
+        extractedCode = leadTag.toUpperCase();
+      }
+
+      // Check separator patterns (e.g. "CODE - Rewards", "CODE : Rewards", "CODE – Rewards", "CODE (Rewards)")
+      const sepMatch = liText.match(/^([A-Za-z0-9_-]{4,35})\s*[:–—\-\(]\s*(.+)$/);
+      if (sepMatch && isValidCode(sepMatch[1])) {
+        extractedCode = sepMatch[1].trim().toUpperCase();
+        rawRewards = sepMatch[2].replace(/\)$/, "").trim();
+      } else if (extractedCode) {
+        rawRewards = liText.replace(new RegExp(`^\\s*${extractedCode}\\s*[:–—\\-\\s]*`, "i"), "");
+      }
+
+      if (!extractedCode || !isValidCode(extractedCode)) return;
+
+      const cleanRew = cleanRewards(rawRewards, extractedCode);
+
+      results.push({
+        game,
+        code: extractedCode,
+        status: sectionStatus,
+        codeType: detectCodeType(extractedCode, prevHeading + " " + liText),
+        server: "All",
+        rewards: cleanRew,
         expires: "",
         discovered: new Date().toISOString().split("T")[0],
         notes: `Extracted from ${new URL(sourceUrl).hostname}`,
         sources: [sourceUrl]
       });
-    }
+    });
   });
 
   // Deduplicate candidates extracted from the same page
@@ -387,3 +538,4 @@ export function parseHtmlCheerio(game, html, sourceUrl) {
 
   return Array.from(unique.values());
 }
+

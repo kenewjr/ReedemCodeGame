@@ -1,7 +1,7 @@
 import { createClient } from "@libsql/client";
 import fs from "node:fs";
 import path from "node:path";
-import { parseExpiryDate, cleanCodeString } from "./parser.js";
+import { parseExpiryDate, cleanCodeString, isValidCode, cleanRewards } from "./parser.js";
 import { SOURCES } from "./sources.js";
 
 const DATA_DIR = path.resolve("data");
@@ -121,7 +121,7 @@ export async function initDb() {
     );
   `);
 
-  // Cleanup test artifacts from production DB if present
+  // Cleanup test artifacts and corrupted codes from production DB if present
   if (!process.env.TEST_DB_PATH) {
     await db.execute(`
       DELETE FROM codes 
@@ -129,6 +129,12 @@ export async function initDb() {
          OR code LIKE 'TESTCODE_%' 
          OR code LIKE 'PAG_%' 
          OR code LIKE 'EXP_%'
+         OR code GLOB 'X[0-9]*' 
+         OR code GLOB '[0-9]*X' 
+         OR code GLOB 'X[0-9]*[A-Z]*' 
+         OR code GLOB '[0-9][0-9][0-9]*[A-Z]*'
+         OR code IN ('code', 'CODE', 'VG247', 'LS500', '13TH', '000NL', 'NOTACode', 'NOTIFIED OF ANY UPDATES', 'ALL ENDFIELD CODES', 'DAILY', 'EVENTS', 'BladeFitCheck', 'SitByEvanescia')
+         OR LENGTH(code) < 4
     `);
     await db.execute(`
       DELETE FROM source_health 
@@ -139,6 +145,20 @@ export async function initDb() {
       SET consecutive_failures = 0, circuit_breaker_active = 0, last_status = 'ok'
       WHERE id IN ('nte-game8', 'wuwa-game8')
     `);
+
+    // Clean any rewards containing code itself or UI artifacts
+    try {
+      const allCodes = await db.execute("SELECT game, code, rewards FROM codes WHERE rewards != ''");
+      for (const row of allCodes.rows) {
+        const cleaned = cleanRewards(String(row.rewards || ""), String(row.code || ""));
+        if (cleaned !== row.rewards) {
+          await db.execute({
+            sql: "UPDATE codes SET rewards = ? WHERE game = ? AND code = ?",
+            args: [cleaned, String(row.game), String(row.code)]
+          });
+        }
+      }
+    } catch {}
   }
 
   // Auto-migration helper for existing databases (codes table)
@@ -337,13 +357,12 @@ export async function getAllSourceHealth() {
 export async function saveCodeCandidate(candidate) {
   const db = getDbClient();
   const rawCode = cleanCodeString(candidate.code);
-  if (!rawCode || rawCode.length < 4 || rawCode.length > 35) {
-    return { record: null, eventType: null };
-  }
-  if (/^code\s*row/i.test(rawCode) || /header|footer/i.test(rawCode)) {
+  if (!rawCode || !isValidCode(rawCode)) {
     return { record: null, eventType: null };
   }
   candidate.code = rawCode;
+  const cleanedRewards = cleanRewards(candidate.rewards || "", candidate.code);
+  candidate.rewards = cleanedRewards;
 
   const now = new Date();
   const nowIso = now.toISOString();

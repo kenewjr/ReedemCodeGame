@@ -1,23 +1,46 @@
 import { getGameMeta } from "./games/registry.js";
 
-export function formatRewards(rawRewards) {
+export function formatRewards(rawRewards, code = "") {
   if (!rawRewards || !String(rawRewards).trim()) return "N/A";
 
-  const cleaned = String(rawRewards)
+  let cleaned = String(rawRewards)
     .replace(/\{\{Item List\|([^}]+)\}\}/g, "$1")
     .replace(/\|mode=br/g, "")
+    .replace(/<[^>]+>/g, " ")
     .replace(/[\r\n]+/g, " ");
+
+  // Remove UI button/action artifacts
+  cleaned = cleaned
+    .replace(/\bCopied\b/gi, "")
+    .replace(/▶︎?\s*Redeem\s*(Code)?\s*(Link|Here)?/gi, "")
+    .replace(/\bDate Added:\s*[\d/]+/gi, "")
+    .replace(/\bExpires?:\s*[\d/-]+(\s*(UTC|PT|ET|GMT|JST))?/gi, "")
+    .replace(/\bValid until:\s*[\d/-]+(\s*(UTC|PT|ET|GMT|JST))?/gi, "")
+    .replace(/\b(Expired|Expires)\s+(TBA|Unknown|[\d/]+)/gi, "")
+    .replace(/https?:\/\/[^\s,]+/g, "");
+
+  // Remove the code itself if present in rewards text
+  if (code && String(code).trim().length >= 4) {
+    const cleanC = String(code).trim();
+    const escapedCode = cleanC.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    cleaned = cleaned.replace(new RegExp(`\\b${escapedCode}\\b`, "gi"), "");
+  }
 
   const items = cleaned
     .split(/(?<!\d),(?!\d)|[;・•|]|\b-\s+|<br\s*\/?>/i)
     .map(line => {
-      let trimmed = line.replace(/^[\s・•\-*]+/, "").replace(/[\s・•\-*]+$/, "").trim();
+      let trimmed = line.replace(/^[\s・•\-*:]+/, "").replace(/[\s・•\-*:]+$/, "").trim();
       trimmed = trimmed.replace(/\s+/g, " ");
       // Convert quantity multiplier asterisk (*100 ->  ×100) to avoid Discord markdown italic formatting
       trimmed = trimmed.replace(/\*(\d+)/g, " ×$1");
       return trimmed;
     })
-    .filter(Boolean);
+    .filter(line => {
+      if (!line) return false;
+      if (code && line.toLowerCase() === String(code).toLowerCase()) return false;
+      if (/^(copied|redeem|link|expires?|valid)/i.test(line)) return false;
+      return true;
+    });
 
   return items.length > 0 ? items.join(", ") : "N/A";
 }
@@ -32,7 +55,7 @@ export function renderMessage(template, data, tags = "") {
   }
 
   const hypertextLink = fullRedeemUrl ? `[click here](${fullRedeemUrl})` : "N/A";
-  const formattedRewards = formatRewards(data.rewards);
+  const formattedRewards = formatRewards(data.rewards, data.code);
 
   let msg = template || "";
   msg = msg.replaceAll("{{game}}", data.game || "");
@@ -84,7 +107,7 @@ export function renderDiscordEmbed(data, tags = "") {
     fullRedeemUrl = `${meta.redeemUrl}${separator}code=${encodeURIComponent(data.code)}`;
   }
 
-  const formattedRewards = formatRewards(data.rewards);
+  const formattedRewards = formatRewards(data.rewards, data.code);
 
   const fields = [
     { name: "Code", value: `\`${data.code}\``, inline: true },

@@ -307,7 +307,6 @@ async function renderLatestCodesStream() {
               ${gameBadge}
               <div class="code-clickable" onclick="copyToClipboard('${r.code}')" title="Click to copy code ${r.code}">
                 <strong class="font-mono text-sm code-text">${r.code}</strong>
-                <span class="copy-hint-icon">📋</span>
               </div>
               <span class="status-badge ${statusClass}">${status}</span>
             </div>
@@ -380,7 +379,6 @@ function renderCodesTable() {
         <td>
           <div class="code-clickable" onclick="copyToClipboard('${c.code}')" title="Click to copy code ${c.code}">
             <strong class="font-mono code-text">${c.code}</strong>
-            <span class="copy-hint-icon">📋</span>
           </div>
         </td>
         <td><span class="badge-type ${typeClass}">${codeType}</span></td>

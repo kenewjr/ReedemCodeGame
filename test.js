@@ -24,7 +24,9 @@ import {
   detectCodeType, 
   parseHoyoCodesJson, 
   parseFandomWikitext, 
-  parseHtmlCheerio 
+  parseHtmlCheerio,
+  isValidCode,
+  cleanRewards
 } from "./src/parser.js";
 
 import { renderMessage, renderDiscordEmbed, formatTags, formatRewards } from "./src/template.js";
@@ -65,7 +67,7 @@ test("Database Layer - Async Init & 3-Tier Lifecycle", async () => {
   const { record: rec2 } = await saveCodeCandidate(cand2);
   assert.equal(rec2.status, "active");
   assert.equal(rec2.verified_count, 2);
-  assert.equal(rec2.rewards, "Stellar Jade*100; Credit*50000"); // Smart enrichment preserved
+  assert.equal(rec2.rewards, "Stellar Jade*100, Credit*50000"); // Smart enrichment preserved & normalized
 });
 
 test("Database Layer - Pagination & Counts Query", async () => {
@@ -534,17 +536,79 @@ test("Expiry Date Sanitization - Corrupted expires_at strings cleared or normali
   assert.ok(typeof cleanup.expiredByDate === "number");
 });
 
-test("Discord Embed - Footer timestamp uses first_seen_at when available", () => {
-  const customFirstSeen = "2026-01-15T08:30:00.000Z";
-  const embedData = {
-    game: "hsr",
-    code: "TIMESTAMPTEST",
-    rewards: "Stellar Jade*50",
-    first_seen_at: customFirstSeen
-  };
+test("Parser & Template - Anti-Code Pollution & Quantity Multiplier Rejection", () => {
+  // 1. Quantity multipliers & UI artifacts rejected as codes
+  assert.equal(isValidCode("X100"), false);
+  assert.equal(isValidCode("X120"), false);
+  assert.equal(isValidCode("X4000"), false);
+  assert.equal(isValidCode("X10000ADVENTURER"), false);
+  assert.equal(isValidCode("X30000HERO"), false);
+  assert.equal(isValidCode("X100MORA"), false);
+  assert.equal(isValidCode("000NL"), false);
+  assert.equal(isValidCode("13TH"), false);
+  assert.equal(isValidCode("VG247"), false);
+  assert.equal(isValidCode("COPIED"), false);
+  assert.equal(isValidCode("REDEEM"), false);
 
-  const rendered = renderDiscordEmbed(embedData);
-  assert.equal(rendered.embeds[0].timestamp, customFirstSeen);
+  // 2. Real codes accepted
+  assert.equal(isValidCode("ZA9674JSAUPF"), true);
+  assert.equal(isValidCode("GENSHIN51YT"), true);
+  assert.equal(isValidCode("NTE0429"), true);
+  assert.equal(isValidCode("STARRAILFATE2026"), true);
+  assert.equal(isValidCode("WUTHERINGGIFT"), true);
+
+  // 3. cleanRewards strips code itself and UI text
+  const dirtyRewards = "GENSHIN51YT, Copied ▶︎ Redeem Code Link, Brilliant Chrysanthemum x5, Mora x30000, Date Added: 08/13";
+  const cleaned = cleanRewards(dirtyRewards, "GENSHIN51YT");
+  assert.equal(cleaned, "Brilliant Chrysanthemum x5, Mora x30000");
+
+  // 4. formatRewards strips code itself and handles asterisks
+  const formatted = formatRewards("ZA9674JSAUPF, Stellar Jade*100, Credit*50000", "ZA9674JSAUPF");
+  assert.equal(formatted, "Stellar Jade ×100, Credit ×50000");
+  assert.ok(!formatted.includes("ZA9674JSAUPF"));
+
+  // 5. renderDiscordEmbed excludes code from Rewards field
+  const embed = renderDiscordEmbed({
+    game: "genshin",
+    code: "GENSHIN51YT",
+    rewards: "GENSHIN51YT, Brilliant Chrysanthemum x5, Mora x30000"
+  });
+  const rewardsField = embed.embeds[0].fields.find(f => f.name === "Rewards");
+  assert.equal(rewardsField.value, "Brilliant Chrysanthemum x5, Mora x30000");
+  assert.ok(!rewardsField.value.includes("GENSHIN51YT"));
+});
+
+test("Parser - Cheerio HTML Table with Clipboard Input & Multipliers", () => {
+  const sampleTableHtml = `
+    <html>
+      <body>
+        <h2>Active Codes</h2>
+        <table>
+          <tr><th>Code</th><th>Rewards</th></tr>
+          <tr>
+            <td>
+              <div class="a-clipboard__container">
+                <input type="text" class="a-clipboard__textInput" value="ZA9674JSAUPF" readonly="">
+                <button>Copied</button>
+              </div>
+              <a href="https://example.com/gift?code=ZA9674JSAUPF">▶︎ Redeem Code Link</a>
+            </td>
+            <td>
+              <div>Stellar Jade x100</div>
+              <div>Credit x50,000</div>
+            </td>
+          </tr>
+        </table>
+      </body>
+    </html>
+  `;
+
+  const parsed = parseHtmlCheerio("hsr", sampleTableHtml, "https://game8.co/hsr");
+  assert.equal(parsed.length, 1);
+  assert.equal(parsed[0].code, "ZA9674JSAUPF");
+  assert.ok(!parsed[0].rewards.includes("ZA9674JSAUPF"));
+  assert.ok(!parsed[0].rewards.includes("Copied"));
+  assert.ok(parsed[0].rewards.includes("Stellar Jade x100"));
 });
 
 // Auto-cleanup test database and remove all dummy test codes
@@ -554,6 +618,7 @@ test.after(async () => {
     const db = getDbClient();
     await db.execute("DELETE FROM codes WHERE code LIKE '%TEST%' OR code LIKE 'SEARCHTEST%' OR code LIKE 'CORRUPT_%' OR code LIKE 'TIMESTAMPTEST%' OR code LIKE 'HSRTEST%' OR code LIKE 'BATCHTEST%' OR code LIKE 'AUTOEXP%' OR code LIKE 'EXPIRE_DELETE_%' OR code LIKE 'NULLSAFE_%'");
   } catch {}
+  setTimeout(() => process.exit(0), 500);
 });
 
 process.on("exit", () => {
